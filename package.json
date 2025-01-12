@@ -6,7 +6,10 @@
     "webpack-cli": "^6.0.1"
   },
   "dependencies": {
-    "three": "^0.172.0"
+    "gl-matrix": "^3.4.3",
+    "three": "^0.172.0",
+    "vue": "^3.5.13",
+    "webpack": "^5.97.1"
   },
   "scripts": {
     "build": "npx webpack"

@@ -1,5 +1,7 @@
 import { VS_SOURCE, FS_SOURCE, FS_SOURCE_MIRRORS, FS_SOURCE_NO_TEXTURE } from './glsl.js'
 import * as RenderUtils from './render_utils.js'
+import {createApp, h} from 'vue';
+import * as glMatrix from 'gl-matrix'
 function hsl_to_rgb(hsl) {
   let r, g, b;
   const h = hsl[0];
@@ -63,22 +65,38 @@ export class App {
     this.init_palette();
     this.init_texture_sketcher();
     this.init_pen_selector();
+    const model_entries = [];
     this.load_model_names((model_names) => {
       _this.model_names = model_names;
       _this.cache.setItem('all_model_names', model_names);
-      const model_entries = []
       for (const model_name of model_names) {
-        model_entries.push({ name: model_name })
+        model_entries.push({ name: model_name });
       }
+      
       // Warmup cache
       _this.warmup_cache(model_names);
       _this.load_spinner_model();
-      new Vue({
-        el: '#model-select',
-        data: {
-          model_entries: model_entries
+      
+      // Create the Vue app
+      const app = createApp({
+        data() {
+          return {
+            model_entries
+          };
+        },
+        render() {
+          return h('select', { name: 'Models', id: 'model-select' }, 
+            this.model_entries.map((model_entry) => 
+              h('option', { 
+                class: 'select-option', 
+                key: model_entry.name, 
+                value: model_entry.name 
+              }, model_entry.name)
+            )
+          );
         }
-      })
+      });
+      app.mount('#model-select-container');
       const model_select_element = document.getElementById('model-select')
       model_select_element.addEventListener('change', (event) => {
         _this.load_and_set_model(model_select_element.value);
@@ -287,7 +305,7 @@ export class App {
     //     palette_canvas.width, palette_canvas.height);
     // }
     palette_canvas.onclick = (event) => {
-      const color = palette_context.getImageData(event.offsetX, event.offsetY, 1, 1).data;
+      const color = palette_context.getImageData(event.offsetX*this.dpr, event.offsetY*this.dpr, 1, 1).data;
       this.pen_color = `rgb(${color[0]},${color[1]},${color[2]})`;
       this.draw_pen_selector()
     }
@@ -428,15 +446,16 @@ export class App {
       const coords = mouse_event_to_coordinates(event);
       const mirror_coords = mirror_coordinates(coords);
       if (event.buttons) {
-        if (_this.path && _this.mirror_path) {
+        if (this._prev_coords & _this.path && _this.mirror_path) {
           if (dist2(coords, _this.prev_coords) * dpr * dpr > 10) {
+            _this.path.moveTo(_this.prev_coords[0], _this.prev_coords[1]);
             _this.path.lineTo(coords[0], coords[1]);
+            const prev_mirror_coordinates = mirror_coordinates(this._prev_coords);
+            _this.mirror_path.moveTo(this.prev_mirror_coordinates[0],
+              this.prev_mirror_coordinates[1])
             _this.mirror_path.lineTo(mirror_coords[0], mirror_coords[1]);
             texture_context.strokeStyle = _this.pen_color;
-            texture_context.fillStyle = _this.pen_color;
             texture_context.lineWidth = _this.pen_radius*2;
-            texture_context.lineCap = 'butt';
-            texture_context.lineJoin = 'miter';
             texture_context.stroke(_this.path)
             texture_context.stroke(_this.mirror_path)
           } else {
@@ -446,12 +465,13 @@ export class App {
           }
         }
         this.prev_coords = [coords[0], coords[1]];
+        this.prev_mirror_coords = [mirror_coords[0], mirror_coords[1]];
 
+        texture_context.fillStyle = this.pen_color;
         texture_context.beginPath();
         texture_context.ellipse(coords[0], coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2)
 //        texture_context.ellipse(coords[0], coords[1], 30, 30, 0, 0, Math.PI * 2)
         texture_context.fill();
-        texture_context.fillStyle = this.pen_color;
         texture_context.lineWidth = 0;
         texture_context.beginPath();
         texture_context.ellipse(mirror_coords[0], mirror_coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2)
@@ -542,3 +562,9 @@ export class App {
   }
 }
 
+
+localStorage.clear()
+window.addEventListener('load', () => {
+  const app = new App()
+  app.init();
+});

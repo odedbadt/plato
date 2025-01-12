@@ -21,20 +21,17 @@
   <title>Museum of polyhedra</title>
   <link type="text/css" rel="stylesheet" href="static/style.css">
   <link rel="icon" type="image/x-icon" href="static/favicon.png">
-  <script src="static/gl-matrix-min.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/vue@2"></script>
-
-  <script type="module" src="static/runner.js" defer></script>
+  <script src="dist/bundle.js" defer></script>
 </head>
 
 <body> <!--30vw 30vw 30vw-->
   <div id="v-div-0">
     <div id="h-div-1">
       <div id="v-div-1">
-        <select name="Models" id="model-select">
-          <option class="select-option" v-for="model_entry in model_entries" :key="model_entry.name" :value="model_entry.name">{{ model_entry.name }}</option>
-        </select>
-        <fieldset id="rendering-options">
+        <div id="model-select-container">
+          
+        </div>
+                <fieldset id="rendering-options">
           <legend>Rendering options:</legend>
           <div>
             <input type="checkbox" id="model" checked=true name="model" value="model">

@@ -1,0 +1,1 @@
+cube,dodecahedron,dodecahedron_a,icosahedron,icosahedron_a,octahedron,random_colored_st_dodec,random_colored_st_octa,sellated_dodecahedron,sellated_octahedron,stellated_dodecahedron,stellated_octahedron
