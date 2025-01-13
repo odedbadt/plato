@@ -1,75 +1,77 @@
- body {
+body {
   display: grid;
   grid-template-columns: 30vw 30vw 30vw;
   grid-template-rows: 80vh;
   background-color: black;
   font-family: monospace;
- }
- canvas {
+}
+ 
+canvas {
   cursor: crosshair;
- }
- #textureCanvas {
-   width: 30vw;
-   height: 30vw;
-   background-color: black;
+}
 
- }
+#textureCanvas {
+  width: 30vw;
+  height: 30vw;
+  background-color: black;
+}
+
  button#clear-cache {
   font-family: monospace;
   margin: 0.5em;
  }
  #mainCanvas {
-    width: 30vw;
-    height: 30vw;
+  width: 30vw;
+  height: 30vw;
 }
  #penCanvas {
-   width: 30vw;
-   height: 30vh;
+  width: 30vw;
+  height: 30vh;
 }
 #v-div-0 {
   display: grid;
   grid-template-rows: 16em calc(80vh - 16em);
  }
+
 #v-div-1 {
   display:grid;
-grid-template-rows: 3em 13em;
-height: 16em;
- }
- #rendering-options {
+  grid-template-rows: 3em 13em;
   height: 16em;
-  
- }
- #h-div-1 {
-  display:grid;
+}
+
+#rendering-options {
+height: 16em; 
+}
+
+#h-div-1 {
+display:grid;
 grid-template-columns: 20vw 10vw;
- }
- #model-select-container {
+}
+
+#model-select {
   height: 3em;
   width: 20vw;
- }
- #penCanvas {
-   width: 10vw;
-   height: 16em;
- }
- fieldset {
-  border: none;
+}
 
- }
- #rendering-options label, legend h3{
+#penCanvas {
+  width: 10vw;
+  height: 16em;
+}
+fieldset {
+  border: none;
+}
+#rendering-options label, legend h3{
   height: 2em;
   flex: 0 0 auto;
   color: grey;
-
- }
-
- legend {
+}
+legend {
   color: grey;
   height: 2em;
   flex: 0 0 auto;
   font-size: large;
   padding: 1em 0 0 0;
-
- }
+}
  #rendering-options checkbox {
   height: 2em;
   flex: 0 0 auto;
@@ -79,20 +81,17 @@ grid-template-columns: 20vw 10vw;
  #canvas-controls {
   display:grid;
   grid-template-columns: 20vh 10vh;
-
  }
 
  #paletteCanvas {
   width: 30vw;
   height: calc(80vh - 16em);
   background-color: orange;
-
  }
  #v-div-2 {
   display: grid;
   width: 30vw;
   height: 80vh;
-
   grid-template-rows: calc(80vh - 2em) 2em;
  }
 button#clear-canvas-button {

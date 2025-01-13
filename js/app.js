@@ -29,7 +29,8 @@ function hsl_to_rgb(hsl) {
   return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
 }
 export class App {
-  constructor(model, spinning_speed, pen_color, pen_radius) {
+  constructor(prefered_model_name, spinning_speed, pen_color, pen_radius) {
+    this.prefered_model_name = prefered_model_name;
     this.model = model;
     this.spinning_speed = spinning_speed || 0;
     this.is_spinning = this.spinning_speed && this.spinning_speed > 0;
@@ -66,12 +67,19 @@ export class App {
     this.init_texture_sketcher();
     this.init_pen_selector();
     const model_entries = [];
+    let prefered_model_name_there = false;
     this.load_model_names((model_names) => {
-      _this.model_names = model_names;
-      _this.cache.setItem('all_model_names', model_names);
+      this.model_names = model_names;
+      this.cache.setItem('all_model_names', model_names);
       for (const model_name of model_names) {
         model_entries.push({ name: model_name });
+        if (model_name == this.prefered_model_name) {
+          prefered_model_name_there = true
+        }
       }
+      const first_model = prefered_model_name_there ? 
+        this.prefered_model_name : 
+        model_names[0]
       
       // Warmup cache
       _this.warmup_cache(model_names);
@@ -88,7 +96,8 @@ export class App {
           return h('select', { name: 'Models', id: 'model-select' }, 
             this.model_entries.map((model_entry) => 
               h('option', { 
-                class: 'select-option', 
+                id:'model-select',
+                class: 'model-select', 
                 key: model_entry.name, 
                 value: model_entry.name 
               }, model_entry.name)
@@ -99,9 +108,8 @@ export class App {
       app.mount('#model-select-container');
       const model_select_element = document.getElementById('model-select')
       model_select_element.addEventListener('change', (event) => {
-        _this.load_and_set_model(model_select_element.value);
+        this.load_and_set_model(model_select_element.value);
       });
-      const first_model = this.model_names[0];
       this.load_and_set_model(first_model, () => {
 
         const clear_btn = document.getElementById('clear-canvas-button');
@@ -432,35 +440,31 @@ export class App {
       _this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1])
     })
     texture_canvas.addEventListener("mouseup", (event) => {
-      if (_this.path) {
-        texture_context.lineWidth = _this.pen_radius;
+      if (this.path) {
+        texture_context.lineWidth = this.pen_radius;
         texture_context.beginPath();
-        texture_context.stroke(_this.path);
-        _this.path = null;
+        texture_context.stroke(this.path);
+        this.path = null;
         texture_context.beginPath();
-        texture_context.stroke(_this.mirror_path);
-        _this.mirror_path = null;
+        texture_context.stroke(this.mirror_path);
+        this.mirror_path = null;
       }
     })
     texture_canvas.addEventListener("mousemove", (event) => {
       const coords = mouse_event_to_coordinates(event);
       const mirror_coords = mirror_coordinates(coords);
       if (event.buttons) {
-        if (this._prev_coords & _this.path && _this.mirror_path) {
-          if (dist2(coords, _this.prev_coords) * dpr * dpr > 10) {
-            _this.path.moveTo(_this.prev_coords[0], _this.prev_coords[1]);
-            _this.path.lineTo(coords[0], coords[1]);
-            const prev_mirror_coordinates = mirror_coordinates(this._prev_coords);
-            _this.mirror_path.moveTo(this.prev_mirror_coordinates[0],
-              this.prev_mirror_coordinates[1])
-            _this.mirror_path.lineTo(mirror_coords[0], mirror_coords[1]);
-            texture_context.strokeStyle = _this.pen_color;
-            texture_context.lineWidth = _this.pen_radius*2;
-            texture_context.stroke(_this.path)
-            texture_context.stroke(_this.mirror_path)
+        if (this.prev_coords & this.path && this.mirror_path) {
+          if (dist2(coords, this.prev_coords) * dpr * dpr > 10) {
+            this.path.lineTo(coords[0], coords[1]);
+            this.mirror_path.lineTo(mirror_coords[0], mirror_coords[1]);
+            texture_context.strokeStyle = this.pen_color;
+            texture_context.lineWidth = this.pen_radius*2;
+            texture_context.stroke(this.path)
+            texture_context.stroke(this.mirror_path)
           } else {
-            _this.path.moveTo(coords[0], coords[1]);
-            _this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1]);
+            this.path.moveTo(coords[0], coords[1]);
+            this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1]);
 
           }
         }
@@ -565,6 +569,6 @@ export class App {
 
 localStorage.clear()
 window.addEventListener('load', () => {
-  const app = new App()
+  const app = new App('stellated_dodecahedron')
   app.init();
 });
