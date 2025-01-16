@@ -35,7 +35,7 @@ export class App {
     this.spinning_speed = spinning_speed || 0;
     this.is_spinning = this.spinning_speed && this.spinning_speed > 0;
     this.alpha = 0;
-    this.pen_color = pen_color || 'black'
+    this.pen_color = pen_color || 'blue'
     this.pen_radius = pen_radius || 5
     this.dpr = window.devicePixelRatio;
     this.spinning_speed = 0.035;
