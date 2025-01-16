@@ -93,10 +93,16 @@ export class App {
           };
         },
         render() {
-          return h('select', { name: 'Models', id: 'model-select' }, 
+          return h('select', 
+            { 
+              name: 'Models', 
+              id: 'model-select', 
+              value: first_model, // Bind the value of the select box
+              onInput: (event) => this.selectedModel = event.target.value // Update selectedModel when user changes selection
+            }, 
             this.model_entries.map((model_entry) => 
               h('option', { 
-                id:'model-select',
+                id: 'model-option', // Unique ID for options (optional)
                 class: 'model-select', 
                 key: model_entry.name, 
                 value: model_entry.name 
@@ -104,6 +110,7 @@ export class App {
             )
           );
         }
+        
       });
       app.mount('#model-select-container');
       const model_select_element = document.getElementById('model-select')
