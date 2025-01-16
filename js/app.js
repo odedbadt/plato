@@ -426,13 +426,13 @@ export class App {
     const _this = this;
 
     texture_canvas.addEventListener("mousedown", (event) => {
-      _this.path = new Path2D();
-      _this.mirror_path = new Path2D();
+      this.path = new Path2D();
+      this.mirror_path = new Path2D();
       texture_context.strokeStyle = 'black'
-      texture_context.fillStyle = _this.pen_color;
+      texture_context.fillStyle = this.pen_color;
       texture_context.lineWidth = 1;
       const coords = mouse_event_to_coordinates(event);
-      _this.prev_coords = [coords[0], coords[1]]
+      this.prev_coords = [coords[0], coords[1]]
       const mirror_coords = mirror_coordinates(coords);
 
       texture_context.beginPath();
@@ -443,8 +443,8 @@ export class App {
       texture_context.fill();
       texture_context.beginPath();
 
-      _this.path.moveTo(coords[0], coords[1])
-      _this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1])
+      this.path.moveTo(coords[0], coords[1])
+      this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1])
     })
     texture_canvas.addEventListener("mouseup", (event) => {
       if (this.path) {
@@ -456,12 +456,13 @@ export class App {
         texture_context.stroke(this.mirror_path);
         this.mirror_path = null;
       }
+      this.prev_coords = mouse_event_to_coordinates(event);
     })
     texture_canvas.addEventListener("mousemove", (event) => {
       const coords = mouse_event_to_coordinates(event);
       const mirror_coords = mirror_coordinates(coords);
       if (event.buttons) {
-        if (this.prev_coords & this.path && this.mirror_path) {
+        if (!!(this.prev_coords && this.path && this.mirror_path)) {
           if (dist2(coords, this.prev_coords) * dpr * dpr > 10) {
             this.path.lineTo(coords[0], coords[1]);
             this.mirror_path.lineTo(mirror_coords[0], mirror_coords[1]);
