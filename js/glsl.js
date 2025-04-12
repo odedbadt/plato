@@ -44,9 +44,8 @@ out vec4 fragColor;
 uniform sampler2D uTexture;
 
 void main(void) {
-  float fVectorIndex = min(float(vectorIndex),256.0)/256.0;
-    fragColor = fBrightness * texture(uTexture, vTextureCoord) * vec4(1.0,1.0,1.0,1.0);
-    fragColor[3] = 1.0;
+    fragColor = vec4(
+      pow(fBrightness * texture(uTexture, vTextureCoord).rgb,vec3(0.3)),1.0);
 }
 `
 
