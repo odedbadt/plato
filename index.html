@@ -24,43 +24,55 @@
   <script src="dist/bundle.js" defer></script>
 </head>
 
-<body> <!--30vw 30vw 30vw-->
-  <div id="v-div-0">
-    <div id="h-div-1">
-      <div id="v-div-1">
-        <div id="model-select-container">
-          
-        </div>
-                <fieldset id="rendering-options">
-          <legend>Rendering options:</legend>
-          <div>
-            <input type="checkbox" id="model" checked=true name="model" value="model">
-            <label for="model">Model</label>
-          </div>
-          <div>
-            <input type="radio" id="generating-mirrors" name="mirrors" value="generating-mirrors">
-            <label for="generating-mirrors">Generating mirrors only</label>
-          </div>
-          <div>
-            <input type="radio" id="all-mirrors" name="mirrors" value="all-mirrors">
-            <label for="all-mirrors">All mirrors</label>
-          </div>
-          <div>
-            <input type="radio" id="no-mirrors" name="mirrors" value="no-mirrors">
-            <label for="no-mirrors">No mirrors</label>
-          </div>
-          <button id="clear-cache">Clear Cache</button>
-        </fieldset>
+<body>
+  <div id="v-div-1">
+    <div id="model-select-container"></div>
+    <fieldset id="rendering-options">
+      <legend>Rendering options:</legend>
+      <div>
+        <input type="checkbox" id="model" checked=true name="model" value="model">
+        <label for="model">Model</label>
       </div>
-      <canvas id="penCanvas"></canvas>
-    </div>
-    <canvas id="paletteCanvas"></canvas>
-  </div>
-  <div id="v-div-2">
-    <canvas id="textureCanvas"></canvas>
-    <button id="clear-canvas-button">Clear canvas</button>
+      <div>
+        <input type="radio" id="generating-mirrors" name="mirrors" value="generating-mirrors">
+        <label for="generating-mirrors">Generating mirrors only</label>
+      </div>
+      <div>
+        <input type="radio" id="all-mirrors" name="mirrors" value="all-mirrors">
+        <label for="all-mirrors">All mirrors</label>
+      </div>
+      <div>
+        <input type="radio" id="no-mirrors" name="mirrors" value="no-mirrors">
+        <label for="no-mirrors">No mirrors</label>
+      </div>
+    </fieldset>
   </div>
   <canvas id="mainCanvas"></canvas>
+  <div id="v-div-2">
+    <canvas id="textureCanvas"></canvas>
+    <div id="buttons">
+      <div class="color color-1"></div>
+      <div class="color color-2"></div>
+      <div class="color color-3"></div>
+      <div class="color color-4"></div>
+      <div class="color color-5"></div>
+      <div class="color color-6"></div>
+      <div class="color color-7"></div>
+      <div class="color color-8"></div>
+      <div class="color color-9"></div>
+      <div class="color color-10"></div>
+      <div class="color color-11"></div>
+      <div class="color color-12"></div>
+      <div class="color color-13"></div>
+      <div class="color color-14"></div>
+      <div class="color color-15"></div>
+      <div class="color color-16"></div>      
+      <div class="action action-1"></div>
+      <div class="action action-2"></div>
+      <div class="action action-3"></div>
+      <div id="clear-canvas-button" class="action action-4"></div>
+    </div>
+  </div>
   <div id="shape-name" style="display:none"></div>
 </body>
 

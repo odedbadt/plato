@@ -1,6 +1,6 @@
 body {
   display: grid;
-  grid-template-columns: 30vw 30vw 30vw;
+  grid-template-columns: 10vw 50vw 24vw;
   grid-template-rows: 80vh;
   background-color: black;
   font-family: monospace;
@@ -11,21 +11,16 @@ canvas {
 }
 
 #textureCanvas {
-  width: 30vw;
-  height: 30vw;
+  width: 24vw;
+  height: 24vw;
   background-color: black;
 }
-
- button#clear-cache {
-  font-family: monospace;
-  margin: 0.5em;
- }
  #mainCanvas {
-  width: 30vw;
-  height: 30vw;
+  width: 50vw;
+  height: 50vw;
 }
  #penCanvas {
-  width: 30vw;
+  width: 0vw;
   height: 30vh;
 }
 #v-div-0 {
@@ -45,12 +40,12 @@ height: 16em;
 
 #h-div-1 {
 display:grid;
-grid-template-columns: 20vw 10vw;
+grid-template-columns: 10vw 0vw;
 }
 
 #model-select {
   height: 3em;
-  width: 20vw;
+  width: 10vw;
 }
 
 #penCanvas {
@@ -90,12 +85,38 @@ legend {
  }
  #v-div-2 {
   display: grid;
-  width: 30vw;
-  height: 80vh;
-  grid-template-rows: calc(80vh - 2em) 2em;
+  width: 24vw;
+  height: 26vh;
+  grid-template-rows: 24vw 2vw;
  }
-button#clear-canvas-button {
-  font-family: monospace;
-  height: 2em;
+ #buttons {
+  width:24vw;
+  display:grid;
+  grid-template-columns: repeat(8, 2vw);
+  grid-template-rows: repeat(2, 2vw);
  }
- 
+ #buttons .color, #buttons .action{
+  width: 2vw;
+  height: 2vw;
+
+  /* simulated bevel */
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.6),  /* top-left highlight */
+    inset -1px -1px 0 rgba(0, 0, 0, 0.3);      /* bottom-right shadow */
+ }
+.color-1  { background-color: #FF4C4C; }  /* bright red */
+.color-2  { background-color: #800000; }  /* dark red */
+.color-3  { background-color: #FF944D; }  /* bright orange */
+.color-4  { background-color: #804000; }  /* dark orange */
+.color-5  { background-color: #FFEB3B; }  /* bright yellow */
+.color-6  { background-color: #807F00; }  /* dark yellow */
+.color-7  { background-color: #AEEA00; }  /* bright lime */
+.color-8  { background-color: #4F6000; }  /* dark lime */
+.color-9  { background-color: #00C853; }  /* bright green */
+.color-10 { background-color: #006400; }  /* dark green */
+.color-11 { background-color: #18FFFF; }  /* bright cyan */
+.color-12 { background-color: #007777; }  /* dark cyan */
+.color-13 { background-color: #448AFF; }  /* bright blue */
+.color-14 { background-color: #003399; }  /* dark blue */
+.color-15 { background-color: #7C4DFF; }  /* bright violet */
+.color-16 { background-color: #3C1A78; }  /* dark violet */
