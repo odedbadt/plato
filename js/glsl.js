@@ -45,7 +45,7 @@ uniform sampler2D uTexture;
 
 void main(void) {
     fragColor = vec4(
-      pow(fBrightness * texture(uTexture, vTextureCoord).rgb,vec3(0.3)),1.0);
+      0.3+0.7*fBrightness * texture(uTexture, vTextureCoord).rgb,1.0);
 }
 `
 

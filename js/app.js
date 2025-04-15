@@ -63,9 +63,9 @@ export class App {
     const _this = this;
     this.init_canvas_sizes();
 
-    this.init_palette();
+   this.init_palette();
     this.init_texture_sketcher();
-    this.init_pen_selector();
+    //this.init_pen_selector();
     const model_entries = [];
     let prefered_model_name_there = false;
     this.load_model_names((model_names) => {
@@ -121,8 +121,8 @@ export class App {
 
         const clear_btn = document.getElementById('clear-canvas-button');
         clear_btn.addEventListener('click', () => _this.clear());
-        const cache_clear_btn = document.getElementById('clear-cache');
-        cache_clear_btn.addEventListener('click', () => localStorage.clear());
+        // const cache_clear_btn = document.getElementById('clear-cache');
+        // cache_clear_btn.addEventListener('click', () => localStorage.clear());
         for (const id of ['model', 'all-mirrors', 'no-mirrors', 'generating-mirrors']) {
           document.getElementById(id).addEventListener('change', () => { _this.is_dirty = true; })
         }
@@ -234,7 +234,7 @@ export class App {
 
     this.init_palette();
     this.init_texture_sketcher();
-    this.init_pen_selector();
+    //this.init_pen_selector();
     this.is_dirty = true
     const _this = this;
     main_canvas.addEventListener("click", (event) => {
@@ -245,8 +245,8 @@ export class App {
     const dpr = this.dpr;
     const _this = this;
     const set_size = () => {
-      _this.init_palette()
-      _this.init_pen_selector()
+      //_this.init_palette()
+      //_this.init_pen_selector()
       const main_canvas_element = document.getElementById('mainCanvas');
       const main_rect = main_canvas_element.getBoundingClientRect();
       main_canvas_element.width = main_rect.width * dpr;
@@ -280,6 +280,14 @@ export class App {
 
   }
   init_palette() {
+    const color_divs = document.getElementsByClassName('color');
+    for (let color_div of color_divs) {
+      color_div.onclick = (event) => {
+        const color = getComputedStyle(color_div).backgroundColor;
+        console.log(color)
+        this.pen_color = color;
+      }    }
+    return
     const palette_canvas = document.getElementById("paletteCanvas");
     const palette_canvas_rect = palette_canvas.getBoundingClientRect();
     const width = palette_canvas_rect.width * this.dpr;
@@ -516,7 +524,7 @@ export class App {
     glMatrix.mat4.rotate(rotation_matrix_4x4, rotation_matrix_4x4, Math.PI / 3, x_axis);
 
     const viewMatrix = glMatrix.mat4.create();
-    glMatrix.mat4.lookAt(viewMatrix, [0, 0, 6], [0, 0, 0], [0, 1, 0]);
+    glMatrix.mat4.lookAt(viewMatrix, [0, -.1, 5], [0, -.1, 0], [0, 1, 0]);
     const projectionMatrix = glMatrix.mat4.create();
     glMatrix.mat4.perspective(projectionMatrix, Math.PI * 0.15, 1, 1, 10.0);
 
