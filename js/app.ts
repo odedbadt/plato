@@ -28,6 +28,62 @@ function hsl_to_rgb(hsl) {
 
   return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
 }
+function parse_RGBA(color) 
+{
+    if (color instanceof Uint8ClampedArray) {
+        return color
+    }
+    // Match the pattern for "rgb(r, g, b)"
+    let regex = /rgba\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)/;
+    // Execute the regex on the input string
+    let result = regex.exec(color);
+    if (result) {
+        // Return the extracted r, g, b values as an array of numbers
+        let r = parseInt(result[1]);
+        let g = parseInt(result[2]);
+        let b = parseInt(result[3]);
+        let a = parseInt(result[4]);
+        return Uint8ClampedArray.from([r, g, b,a]);
+    } else {
+        throw new Error("Invalid rgb string format");
+    }
+}
+function _floodfill(read_context, write_context,
+  replaced_color, tool_color,
+  x, y, w, h) {
+const context_image_data = read_context.getImageData(0, 0, w, h)
+const context_data =  context_image_data.data;
+let safety = w*h*4;
+let stack = [{x:Math.floor(x),y:Math.floor(y)}]
+while (stack.length > 0 && safety-- > 0) {
+const dot = stack.pop();
+if (!dot) {
+break
+}
+const x = dot.x;
+const y = dot.y;
+if (x < 0 ||
+y < 0 ||
+x > w ||
+y >= h) {
+continue
+}
+const offset = (w*y+x)*4;
+const color_at_xy = context_data.slice(offset, offset+4);
+if (!_equal_colors(replaced_color, color_at_xy)) {
+continue;
+}
+context_data[offset + 0] = tool_color[0];
+context_data[offset + 1] = tool_color[1];
+context_data[offset + 2] = tool_color[2];
+context_data[offset + 3] = 255;
+stack.push({x:x+1,y:y})
+stack.push({x:x-1,y:y})
+stack.push({x:x,y:y-1})
+stack.push({x:x,y:y+1})
+}
+write_context.putImageData(context_image_data, 0,0);
+}
 export class App {
   constructor(prefered_model_name, spinning_speed, pen_color, pen_radius) {
     this.prefered_model_name = prefered_model_name;
@@ -65,7 +121,7 @@ export class App {
 
    this.init_palette();
     this.init_texture_sketcher();
-    //this.init_pen_selector();
+    this.init_actions();
     const model_entries = [];
     let prefered_model_name_there = false;
     this.load_model_names((model_names) => {
@@ -234,7 +290,7 @@ export class App {
 
     this.init_palette();
     this.init_texture_sketcher();
-    //this.init_pen_selector();
+    this.init_actions();
     this.is_dirty = true
     const _this = this;
     main_canvas.addEventListener("click", (event) => {
@@ -286,53 +342,43 @@ export class App {
         const color = getComputedStyle(color_div).backgroundColor;
         console.log(color)
         this.pen_color = color;
-      }    }
-    return
-    const palette_canvas = document.getElementById("paletteCanvas");
-    const palette_canvas_rect = palette_canvas.getBoundingClientRect();
-    const width = palette_canvas_rect.width * this.dpr;
-    const height = palette_canvas_rect.height * this.dpr;
-    palette_canvas.width = width;
-    palette_canvas.height = height;
-    const palette_context = palette_canvas.getContext('2d', { 'willReadFrequently': true });
-    const image_data = palette_context.getImageData(0, 0, palette_canvas.width, palette_canvas.height)
-    const data = image_data.data;
-    for (let y = 0; y < palette_canvas.height; y++) {
-      for (let x = 0; x < palette_canvas.width; x++) {
-        const h = x / palette_canvas.width;
-
-        const s = 1;
-        const l = y / palette_canvas.height;
-        const rgb = hsl_to_rgb([h, s, l]);
-        const base_offset = (y * palette_canvas.width + x) * 4;
-        data[base_offset] = 255;
-        data[base_offset + 1] = 0;
-        data[base_offset + 2] = 0;
-        data[base_offset] = rgb[0];
-        data[base_offset + 1] = rgb[1];
-        data[base_offset + 2] = rgb[2];
-        data[base_offset + 3] = 255;
-
-
-      }
-
-
-
-    }
-    palette_context.putImageData(image_data, 0, 0);
-    // var img = new Image();
-    // img.src = "static/palette.png"; // Replace with the path to your image
-    const dpr = this.dpr;
-    // img.onload = () => {
-    //   palette_context.drawImage(img, 0, 0, 25, 200, 0, 0,
-    //     palette_canvas.width, palette_canvas.height);
-    // }
-    palette_canvas.onclick = (event) => {
-      const color = palette_context.getImageData(event.offsetX*this.dpr, event.offsetY*this.dpr, 1, 1).data;
-      this.pen_color = `rgb(${color[0]},${color[1]},${color[2]})`;
-      this.draw_pen_selector()
+      }    
     }
   }
+  init_actions() {
+    const pen_size_divs = document.getElementsByClassName('pen-size');
+    for (let pen_size_div of pen_size_divs) {
+      pen_size_div.onclick = (event) => {
+        const classes = pen_size_div.classList;
+        for (let class_name of classes) {
+          const m = class_name.match(/pen-size-(\d+)/);
+          if (m) {
+            const pen_size = Number(m[1]);
+          console.log(pen_size)
+        this.pen_radius = pen_size;
+          }
+        }
+      }
+    }
+    const floodfill_div = document.getElementById('floodfill')
+    floodfill_div.addEventListener('click', (event) =>{
+      const texture_canvas = this.texture_canvas;
+      const texture_canvas_element = document.getElementById('textureCanvas');
+      const texture_canvas_context = texture_canvas_element.getContext('2d', { 'willReadFrequently': true });
+      const coords = this.mouse_event_to_coordinates(event);
+      const w = texture_canvas_element.width;
+      const h = texture_canvas_element.height;
+      const replaced_color = texture_canvas_context.getImageData(coords[0],coords[1],1,1).data;
+      const parsed_fore_color = parse_RGBA(this.pen_color);
+      _floodfill(texture_canvas_context, texture_canvas_context, replaced_color, parsed_fore_color,at.x,at.y, w, h);
+
+    })
+  }
+        // const pen_size = pen_size_div).backgroundpen_size;
+        // console.log(pen_size)
+        // this.pen_pen_size = pen_size;
+      
+    
   draw_pen_selector() {
     const pen_canvas = document.getElementById("penCanvas");
     const pen_context = pen_canvas.getContext('2d', { willReadFrequently: true });
@@ -391,6 +437,11 @@ export class App {
     texture_context.fillRect(0, 0, w, h);
     this.is_dirty = true;
   }
+  mouse_event_to_coordinates = (event) => {
+    const canvas_x = event.offsetX;
+    const canvas_y = event.offsetY;
+    return [canvas_x * this.dpr, canvas_y * this.dpr];
+  }
   init_texture_sketcher() {
     const texture_canvas = document.getElementById("textureCanvas");
     const texture_context = texture_canvas.getContext('2d', { willReadFrequently: true });
@@ -439,7 +490,7 @@ export class App {
       texture_context.strokeStyle = 'black'
       texture_context.fillStyle = this.pen_color;
       texture_context.lineWidth = 1;
-      const coords = mouse_event_to_coordinates(event);
+      const coords = this.mouse_event_to_coordinates(event);
       this.prev_coords = [coords[0], coords[1]]
       const mirror_coords = mirror_coordinates(coords);
 
@@ -464,10 +515,10 @@ export class App {
         texture_context.stroke(this.mirror_path);
         this.mirror_path = null;
       }
-      this.prev_coords = mouse_event_to_coordinates(event);
+      this.prev_coords = this.mouse_event_to_coordinates(event);
     })
     texture_canvas.addEventListener("mousemove", (event) => {
-      const coords = mouse_event_to_coordinates(event);
+      const coords = this.mouse_event_to_coordinates(event);
       const mirror_coords = mirror_coordinates(coords);
       if (event.buttons) {
         if (!!(this.prev_coords && this.path && this.mirror_path)) {

@@ -104,19 +104,20 @@ legend {
     inset 1px 1px 0 rgba(255, 255, 255, 0.6),  /* top-left highlight */
     inset -1px -1px 0 rgba(0, 0, 0, 0.3);      /* bottom-right shadow */
  }
-.color-1  { background-color: #FF4C4C; }  /* bright red */
-.color-2  { background-color: #800000; }  /* dark red */
-.color-3  { background-color: #FF944D; }  /* bright orange */
-.color-4  { background-color: #804000; }  /* dark orange */
-.color-5  { background-color: #FFEB3B; }  /* bright yellow */
-.color-6  { background-color: #807F00; }  /* dark yellow */
-.color-7  { background-color: #AEEA00; }  /* bright lime */
-.color-8  { background-color: #4F6000; }  /* dark lime */
-.color-9  { background-color: #00C853; }  /* bright green */
-.color-10 { background-color: #006400; }  /* dark green */
-.color-11 { background-color: #18FFFF; }  /* bright cyan */
-.color-12 { background-color: #007777; }  /* dark cyan */
-.color-13 { background-color: #448AFF; }  /* bright blue */
-.color-14 { background-color: #003399; }  /* dark blue */
-.color-15 { background-color: #7C4DFF; }  /* bright violet */
-.color-16 { background-color: #3C1A78; }  /* dark violet */
+ .color-1  { background-color: #FF4C4C; }  /* bright red */
+ .color-2  { background-color: #800000; }  /* dark red */
+ .color-3  { background-color: #FF94C2; }  /* pastel pink */
+ .color-4  { background-color: #FF944D; }  /* bright orange */
+ .color-5  { background-color: #FFEB99; }  /* pastel yellow */
+ .color-6  { background-color: #FFEB3B; }  /* bright yellow */
+ .color-7  { background-color: #AEEA00; }  /* bright lime */
+ .color-8  { background-color: #C8FACC; }  /* pastel green */
+ .color-9  { background-color: #00C853; }  /* bright green */
+ .color-10 { background-color: #006400; }  /* dark green */
+ .color-11 { background-color: #B2EBF2; }  /* pastel cyan/blue */
+ .color-12 { background-color: #448AFF; }  /* bright blue */
+ .color-13 { background-color: #003399; }  /* dark blue */
+ .color-14 { background-color: #7C4DFF; }  /* bright violet */
+ .color-15 { background-color: #F8BFFF; }  /* pastel violet/pink */
+ .color-16 { background-color: #3C1A78; }  /* dark violet */
+ 

@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "moduleResolution": "node",
+    "sourceMap": true,
+    "typeRoots": ["./types", "./node_modules/@types"],
+    "target": "es6",                 // Specify ECMAScript target version
+    "module": "es6",            // Specify module code generation
+    "outDir": "./distro",         // Output directory for compiled files
+    "rootDir": "./src",              // Root directory of source files
+    "allowJs": true,                 // Allow JavaScript files to be compiled
+    "checkJs": false,                // Disable type checking on JavaScript files (set to true to enable)
+    "strict": true,                   // Enable strict type checking
+    "esModuleInterop": true,           // Enable compatibility for CommonJS and ES Modules
+    "allowSyntheticDefaultImports": true,
+    "noEmit": true  },
+  "include": [
+    "src/**/*"                        // Include all files in the src directory
+  ],
+  "exclude": [
+    "node_modules",                   // Exclude node_modules
+    "src/**/scribble.ts"
+  ]
+}
