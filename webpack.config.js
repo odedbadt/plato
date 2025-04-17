@@ -1,7 +1,7 @@
 import path from 'path';
 
 export default {
-  entry: './js/app.js',
+  entry: './js/app.ts',
   output: {
     path: path.resolve('dist'),
     filename: 'bundle.js',

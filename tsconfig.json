@@ -14,10 +14,10 @@
     "allowSyntheticDefaultImports": true,
     "noEmit": true  },
   "include": [
-    "src/**/*"                        // Include all files in the src directory
+    "js/**/*"                        // Include all files in the src directory
   ],
   "exclude": [
     "node_modules",                   // Exclude node_modules
-    "src/**/scribble.ts"
+    
   ]
 }
