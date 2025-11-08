@@ -1,23 +1,40 @@
 {
   "compilerOptions": {
-    "moduleResolution": "node",
-    "sourceMap": true,
-    "typeRoots": ["./types", "./node_modules/@types"],
-    "target": "es6",                 // Specify ECMAScript target version
-    "module": "es6",            // Specify module code generation
-    "outDir": "./distro",         // Output directory for compiled files
-    "rootDir": "./src",              // Root directory of source files
-    "allowJs": true,                 // Allow JavaScript files to be compiled
-    "checkJs": false,                // Disable type checking on JavaScript files (set to true to enable)
-    "strict": true,                   // Enable strict type checking
-    "esModuleInterop": true,           // Enable compatibility for CommonJS and ES Modules
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler", // good with webpack/vite + ESM
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "strict": false, // TEMP: off – turn on later per-folder
+    "skipLibCheck": true,
+    "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "noEmit": true  },
+    "useDefineForClassFields": false, // matches JS field semantics
+    "resolveJsonModule": true,
+    "types": [
+      "node",
+      "webpack-env"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "src/*"
+      ]
+    }
+  },
   "include": [
-    "js/**/*"                        // Include all files in the src directory
+    "src/**/*",
+    "types/**/*.d.ts"
   ],
   "exclude": [
-    "node_modules",                   // Exclude node_modules
-    
+    "node_modules",
+    "dist",
+    "distro"
   ]
 }

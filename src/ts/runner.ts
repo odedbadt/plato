@@ -1,4 +1,4 @@
-import { App } from './main_app.js'
+import { App } from 'main_app.ts'
 
 
 localStorage.clear()
