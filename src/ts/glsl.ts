@@ -102,3 +102,32 @@ void main(void) {
   fragColor = vec4(vec3(0.5,0.9,1.0)*fBrightness,0.5);
 }
 `
+export const VS_SOURCE_OVERLAY = `#version 300 es
+in vec3 aVertexPosition;
+in vec2 aTextureCoord;
+
+out vec2 vTextureCoord;
+
+void main(void) {
+
+  gl_Position = vec4(aVertexPosition, 1.0);
+  vTextureCoord = aTextureCoord;
+
+}
+`
+export const FS_SOURCE_OVERLAY = `#version 300 es
+precision mediump float;
+in vec2 vTextureCoord;
+in float fBrightness;
+in float vectorIndex;
+in vec4 oVertexColor;
+
+out vec4 fragColor;
+uniform sampler2D uTexture;
+
+void main(void) {
+  fragColor = texture(uTexture, vTextureCoord);
+
+  //fragColor = vec4(0.0,1.0,0.0,1.0);
+}
+`

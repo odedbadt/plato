@@ -1,8 +1,12 @@
 // @ts-nocheck
-import { VS_SOURCE, FS_SOURCE, FS_SOURCE_MIRRORS, FS_SOURCE_NO_TEXTURE } from './glsl'
+import * as Glsl from './glsl'
+
 import * as RenderUtils from './render_utils'
-import {createApp, h} from 'vue';
+import { createApp, h } from 'vue';
 import * as glMatrix from 'gl-matrix'
+// shim added by migration
+const _equal_colors = (a: any, b: any) => JSON.stringify(a) === JSON.stringify(b);
+
 function hsl_to_rgb(hsl) {
   let r, g, b;
   const h = hsl[0];
@@ -29,61 +33,60 @@ function hsl_to_rgb(hsl) {
 
   return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
 }
-function parse_RGBA(color) 
-{
-    if (color instanceof Uint8ClampedArray) {
-        return color
-    }
-    // Match the pattern for "rgb(r, g, b)"
-    let regex = /rgba\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)/;
-    // Execute the regex on the input string
-    let result = regex.exec(color);
-    if (result) {
-        // Return the extracted r, g, b values as an array of numbers
-        let r = parseInt(result[1]);
-        let g = parseInt(result[2]);
-        let b = parseInt(result[3]);
-        let a = parseInt(result[4]);
-        return Uint8ClampedArray.from([r, g, b,a]);
-    } else {
-        throw new Error("Invalid rgb string format");
-    }
+function parse_RGBA(color) {
+  if (color instanceof Uint8ClampedArray) {
+    return color
+  }
+  // Match the pattern for "rgb(r, g, b)"
+  let regex = /rgba\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)/;
+  // Execute the regex on the input string
+  let result = regex.exec(color);
+  if (result) {
+    // Return the extracted r, g, b values as an array of numbers
+    let r = parseInt(result[1]);
+    let g = parseInt(result[2]);
+    let b = parseInt(result[3]);
+    let a = parseInt(result[4]);
+    return Uint8ClampedArray.from([r, g, b, a]);
+  } else {
+    throw new Error("Invalid rgb string format");
+  }
 }
 function _floodfill(read_context, write_context,
   replaced_color, tool_color,
   x, y, w, h) {
-const context_image_data = read_context.getImageData(0, 0, w, h)
-const context_data =  context_image_data.data;
-let safety = w*h*4;
-let stack = [{x:Math.floor(x),y:Math.floor(y)}]
-while (stack.length > 0 && safety-- > 0) {
-const dot = stack.pop();
-if (!dot) {
-break
-}
-const x = dot.x;
-const y = dot.y;
-if (x < 0 ||
-y < 0 ||
-x > w ||
-y >= h) {
-continue
-}
-const offset = (w*y+x)*4;
-const color_at_xy = context_data.slice(offset, offset+4);
-if (!_equal_colors(replaced_color, color_at_xy)) {
-continue;
-}
-context_data[offset + 0] = tool_color[0];
-context_data[offset + 1] = tool_color[1];
-context_data[offset + 2] = tool_color[2];
-context_data[offset + 3] = 255;
-stack.push({x:x+1,y:y})
-stack.push({x:x-1,y:y})
-stack.push({x:x,y:y-1})
-stack.push({x:x,y:y+1})
-}
-write_context.putImageData(context_image_data, 0,0);
+  const context_image_data = read_context.getImageData(0, 0, w, h)
+  const context_data = context_image_data.data;
+  let safety = w * h * 4;
+  let stack = [{ x: Math.floor(x), y: Math.floor(y) }]
+  while (stack.length > 0 && safety-- > 0) {
+    const dot = stack.pop();
+    if (!dot) {
+      break
+    }
+    const x = dot.x;
+    const y = dot.y;
+    if (x < 0 ||
+      y < 0 ||
+      x > w ||
+      y >= h) {
+      continue
+    }
+    const offset = (w * y + x) * 4;
+    const color_at_xy = context_data.slice(offset, offset + 4);
+    if (!_equal_colors(replaced_color, color_at_xy)) {
+      continue;
+    }
+    context_data[offset + 0] = tool_color[0];
+    context_data[offset + 1] = tool_color[1];
+    context_data[offset + 2] = tool_color[2];
+    context_data[offset + 3] = 255;
+    stack.push({ x: x + 1, y: y })
+    stack.push({ x: x - 1, y: y })
+    stack.push({ x: x, y: y - 1 })
+    stack.push({ x: x, y: y + 1 })
+  }
+  write_context.putImageData(context_image_data, 0, 0);
 }
 export class App {
   constructor(prefered_model_name, spinning_speed, pen_color, pen_radius) {
@@ -119,8 +122,8 @@ export class App {
   init() {
     const _this = this;
     this.init_canvas_sizes();
-
-   this.init_palette();
+    this.clear();
+    this.init_palette();
     this.init_texture_sketcher();
     this.init_actions();
     const model_entries = [];
@@ -134,14 +137,14 @@ export class App {
           prefered_model_name_there = true
         }
       }
-      const first_model = prefered_model_name_there ? 
-        this.prefered_model_name : 
+      const first_model = prefered_model_name_there ?
+        this.prefered_model_name :
         model_names[0]
-      
+
       // Warmup cache
       _this.warmup_cache(model_names);
       _this.load_spinner_model();
-      
+
       // Create the Vue app
       const app = createApp({
         data() {
@@ -150,24 +153,24 @@ export class App {
           };
         },
         render() {
-          return h('select', 
-            { 
-              name: 'Models', 
-              id: 'model-select', 
+          return h('select',
+            {
+              name: 'Models',
+              id: 'model-select',
               value: first_model, // Bind the value of the select box
               onInput: (event) => this.selectedModel = event.target.value // Update selectedModel when user changes selection
-            }, 
-            this.model_entries.map((model_entry) => 
-              h('option', { 
+            },
+            this.model_entries.map((model_entry) =>
+              h('option', {
                 id: 'model-option', // Unique ID for options (optional)
-                class: 'model-select', 
-                key: model_entry.name, 
-                value: model_entry.name 
+                class: 'model-select',
+                key: model_entry.name,
+                value: model_entry.name
               }, model_entry.name)
             )
           );
         }
-        
+
       });
       app.mount('#model-select-container');
       const model_select_element = document.getElementById('model-select')
@@ -197,7 +200,7 @@ export class App {
       main_canvas.addEventListener("click", (event) => {
         _this.is_spinning = !_this.is_spinning;
       })
-    
+
 
     })
   }
@@ -343,7 +346,7 @@ export class App {
         const color = getComputedStyle(color_div).backgroundColor;
         console.log(color)
         this.pen_color = color;
-      }    
+      }
     }
   }
   init_actions() {
@@ -355,31 +358,31 @@ export class App {
           const m = class_name.match(/pen-size-(\d+)/);
           if (m) {
             const pen_size = Number(m[1]);
-          console.log(pen_size)
-        this.pen_radius = pen_size;
+            console.log(pen_size)
+            this.pen_radius = pen_size;
           }
         }
       }
     }
     const floodfill_div = document.getElementById('floodfill')
-    floodfill_div.addEventListener('click', (event) =>{
+    floodfill_div.addEventListener('click', (event) => {
       const texture_canvas = this.texture_canvas;
       const texture_canvas_element = document.getElementById('textureCanvas');
       const texture_canvas_context = texture_canvas_element.getContext('2d', { 'willReadFrequently': true });
       const coords = this.mouse_event_to_coordinates(event);
       const w = texture_canvas_element.width;
       const h = texture_canvas_element.height;
-      const replaced_color = texture_canvas_context.getImageData(coords[0],coords[1],1,1).data;
+      const replaced_color = texture_canvas_context.getImageData(coords[0], coords[1], 1, 1).data;
       const parsed_fore_color = parse_RGBA(this.pen_color);
-      _floodfill(texture_canvas_context, texture_canvas_context, replaced_color, parsed_fore_color,at.x,at.y, w, h);
+      _floodfill(texture_canvas_context, texture_canvas_context, replaced_color, parsed_fore_color, at.x, at.y, w, h);
 
     })
   }
-        // const pen_size = pen_size_div).backgroundpen_size;
-        // console.log(pen_size)
-        // this.pen_pen_size = pen_size;
-      
-    
+  // const pen_size = pen_size_div).backgroundpen_size;
+  // console.log(pen_size)
+  // this.pen_pen_size = pen_size;
+
+
   draw_pen_selector() {
     const pen_canvas = document.getElementById("penCanvas");
     const pen_context = pen_canvas.getContext('2d', { willReadFrequently: true });
@@ -434,8 +437,8 @@ export class App {
     const texture_context = texture_canvas.getContext('2d', { willReadFrequently: true });
     const w = texture_canvas.width;
     const h = texture_canvas.height;
-    texture_context.fillStyle = 'white';
-    texture_context.fillRect(0, 0, w, h);
+    // texture_context.fillStyle = '#0000';
+    texture_context.clearRect(0, 0, w, h);
     this.is_dirty = true;
   }
   mouse_event_to_coordinates = (event) => {
@@ -445,9 +448,9 @@ export class App {
   }
   init_texture_sketcher() {
     const texture_canvas = document.getElementById("textureCanvas");
+    const model_canvas = document.getElementById("mainCanvas");
     const texture_context = texture_canvas.getContext('2d', { willReadFrequently: true });
-    texture_context.fillStyle = "white";
-    texture_context.fillRect(0, 0,
+    texture_context.clearRect(0, 0,
       texture_canvas.width, texture_canvas.height);
     // const frame_texture = () {
     //   texture_context.lineWidth = 3;
@@ -485,7 +488,7 @@ export class App {
     }
     const _this = this;
 
-    texture_canvas.addEventListener("mousedown", (event) => {
+    model_canvas.addEventListener("mousedown", (event) => {
       this.path = new Path2D();
       this.mirror_path = new Path2D();
       texture_context.strokeStyle = 'black'
@@ -506,7 +509,7 @@ export class App {
       this.path.moveTo(coords[0], coords[1])
       this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1])
     })
-    texture_canvas.addEventListener("mouseup", (event) => {
+    model_canvas.addEventListener("mouseup", (event) => {
       if (this.path) {
         texture_context.lineWidth = this.pen_radius;
         texture_context.beginPath();
@@ -518,7 +521,7 @@ export class App {
       }
       this.prev_coords = this.mouse_event_to_coordinates(event);
     })
-    texture_canvas.addEventListener("mousemove", (event) => {
+    model_canvas.addEventListener("mousemove", (event) => {
       const coords = this.mouse_event_to_coordinates(event);
       const mirror_coords = mirror_coordinates(coords);
       if (event.buttons) {
@@ -527,7 +530,7 @@ export class App {
             this.path.lineTo(coords[0], coords[1]);
             this.mirror_path.lineTo(mirror_coords[0], mirror_coords[1]);
             texture_context.strokeStyle = this.pen_color;
-            texture_context.lineWidth = this.pen_radius*2;
+            texture_context.lineWidth = this.pen_radius * 2;
             texture_context.stroke(this.path)
             texture_context.stroke(this.mirror_path)
           } else {
@@ -542,7 +545,7 @@ export class App {
         texture_context.fillStyle = this.pen_color;
         texture_context.beginPath();
         texture_context.ellipse(coords[0], coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2)
-//        texture_context.ellipse(coords[0], coords[1], 30, 30, 0, 0, Math.PI * 2)
+        //        texture_context.ellipse(coords[0], coords[1], 30, 30, 0, 0, Math.PI * 2)
         texture_context.fill();
         texture_context.lineWidth = 0;
         texture_context.beginPath();
@@ -596,17 +599,17 @@ export class App {
 
     }
     //RenderUtils.clear(main_gl)
-    const main_shader_program = RenderUtils.build_program(main_gl, VS_SOURCE, FS_SOURCE, true,
-      texture_canvas.width, texture_canvas.height);
     if (document.getElementById('model').checked) {
+      const main_shader_program = RenderUtils.build_program(main_gl, Glsl.VS_SOURCE, Glsl.FS_SOURCE, true,
+        texture_canvas.width, texture_canvas.height);
       RenderUtils.draw_model(main_gl, main_shader_program, uniforms,
         this.model)
       RenderUtils.unbind_data(main_gl)
     }
-    const mirror_shader_program = RenderUtils.build_program(main_gl, VS_SOURCE, FS_SOURCE_MIRRORS, false,
-      texture_canvas.width, texture_canvas.height);
 
     if (this.model.mirrors) {
+      const mirror_shader_program = RenderUtils.build_program(main_gl, Glsl.VS_SOURCE, Glsl.FS_SOURCE_MIRRORS, false,
+        texture_canvas.width, texture_canvas.height);
       if (document.getElementById('all-mirrors').checked) {
         RenderUtils.draw_model(main_gl, mirror_shader_program, uniforms,
           {
@@ -622,6 +625,26 @@ export class App {
           450)
       }
     }
+    const overlay_shader_program = RenderUtils.build_program(main_gl,
+      Glsl.VS_SOURCE_OVERLAY, Glsl.FS_SOURCE_OVERLAY, false,
+      0, 0);
+    RenderUtils.draw_model(main_gl, overlay_shader_program, {},
+      {
+        "vertices": [
+          -1, -1, -1,
+          1, -1, -1,
+          -1, 1, -1,
+          1, 1, -1,
+          1, -1, -1,
+          -1, 1, -1],
+        "texture": [
+          0, 1,
+          1, 1,
+          0, 0,
+          1, 0,
+          1, 1,
+          0, 0]
+      })
 
   };
   spin_and_draw() {
@@ -641,5 +664,3 @@ window.addEventListener('load', () => {
   app.init();
 });
 
-// shim added by migration
-const _equal_colors = (a:any, b:any) => JSON.stringify(a) === JSON.stringify(b);
