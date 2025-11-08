@@ -437,8 +437,11 @@ export class App {
     const texture_context = texture_canvas.getContext('2d', { willReadFrequently: true });
     const w = texture_canvas.width;
     const h = texture_canvas.height;
+    // texture_context.fillStyle = "white";
+    // texture_context.fillRect(0, 0,
+    texture_context.clearRect(0, 0,
+      texture_canvas.width, texture_canvas.height);
     // texture_context.fillStyle = '#0000';
-    texture_context.clearRect(0, 0, w, h);
     this.is_dirty = true;
   }
   mouse_event_to_coordinates = (event) => {
@@ -450,8 +453,7 @@ export class App {
     const texture_canvas = document.getElementById("textureCanvas");
     const model_canvas = document.getElementById("mainCanvas");
     const texture_context = texture_canvas.getContext('2d', { willReadFrequently: true });
-    texture_context.clearRect(0, 0,
-      texture_canvas.width, texture_canvas.height);
+    this.clear();
     // const frame_texture = () {
     //   texture_context.lineWidth = 3;
     //   texture_context.fillStyle = "black";

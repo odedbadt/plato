@@ -25,28 +25,7 @@
 </head>
 
 <body>
-  <div id="v-div-1">
-    <div id="model-select-container"></div>
-    <fieldset id="rendering-options">
-      <legend>Rendering options:</legend>
-      <div>
-        <input type="checkbox" id="model" checked=true name="model" value="model">
-        <label for="model">Model</label>
-      </div>
-      <div>
-        <input type="radio" id="generating-mirrors" name="mirrors" value="generating-mirrors">
-        <label for="generating-mirrors">Generating mirrors only</label>
-      </div>
-      <div>
-        <input type="radio" id="all-mirrors" name="mirrors" value="all-mirrors">
-        <label for="all-mirrors">All mirrors</label>
-      </div>
-      <div>
-        <input type="radio" id="no-mirrors" name="mirrors" value="no-mirrors">
-        <label for="no-mirrors">No mirrors</label>
-      </div>
-    </fieldset>
-  </div>
+
   <canvas id="mainCanvas"></canvas>
   <div id="v-div-2">
     <canvas id="textureCanvas"></canvas>
@@ -66,7 +45,7 @@
       <div class="color color-13"></div>
       <div class="color color-14"></div>
       <div class="color color-15"></div>
-      <div class="color color-16"></div>      
+      <div class="color color-16"></div>
       <div class="action action-1 pen-size pen-size-1">
         <svg width="20" height="20" style="background-color:white;border: 1px solid #ccc;">
           <circle cx="10" cy="10" r="1" fill="black" />
@@ -89,6 +68,28 @@
     </div>
   </div>
   <div id="shape-name" style="display:none"></div>
+  <div id="v-div-1">
+    <div id="model-select-container"></div>
+    <fieldset id="rendering-options">
+      <legend>Rendering options:</legend>
+      <div>
+        <input type="checkbox" id="model" checked=true name="model" value="model">
+        <label for="model">Model</label>
+      </div>
+      <div>
+        <input type="radio" id="generating-mirrors" name="mirrors" value="generating-mirrors">
+        <label for="generating-mirrors">Generating mirrors only</label>
+      </div>
+      <div>
+        <input type="radio" id="all-mirrors" name="mirrors" value="all-mirrors">
+        <label for="all-mirrors">All mirrors</label>
+      </div>
+      <div>
+        <input type="radio" id="no-mirrors" name="mirrors" value="no-mirrors">
+        <label for="no-mirrors">No mirrors</label>
+      </div>
+    </fieldset>
+  </div>
 </body>
 
 </html>

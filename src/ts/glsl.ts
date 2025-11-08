@@ -44,8 +44,14 @@ out vec4 fragColor;
 uniform sampler2D uTexture;
 
 void main(void) {
-    fragColor = vec4(
-      0.3+0.7*fBrightness * texture(uTexture, vTextureCoord).rgb,1.0);
+    vec4 sampled = texture(uTexture, vTextureCoord);
+    // -    fragColor = vec4(
+    //   -      0.3+0.7*fBrightness * white_back,1.0);
+    vec3 shaded_back  = 0.3+0.7*vec3(fBrightness);
+    vec3 shaded_front = 0.3+0.7*fBrightness * sampled.rgb;
+    float front_alpha =sampled.a; 
+    fragColor = vec4(shaded_front*front_alpha+shaded_back*(1.0-front_alpha), 1.0);
+    //fragColor = vec4(white_back,1.0);
 }
 `
 
@@ -126,8 +132,7 @@ out vec4 fragColor;
 uniform sampler2D uTexture;
 
 void main(void) {
-  fragColor = texture(uTexture, vTextureCoord);
-
-  //fragColor = vec4(0.0,1.0,0.0,1.0);
+  vec4 sampled = texture(uTexture, vTextureCoord);
+  fragColor = vec4(sampled.rgb, sampled.a*0.1);
 }
 `

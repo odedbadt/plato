@@ -1,9 +1,13 @@
 body {
   display: grid;
-  grid-template-columns: 10vw 30vw 30vw;
+  grid-template-columns: min(100vh, 100vh) min(100vh, 100vh);
   grid-template-rows: 80vh;
   background-color: black;
   font-family: monospace;
+}
+
+#v-div-1 {
+  display: none;
 }
 
 canvas {
@@ -11,14 +15,15 @@ canvas {
 }
 
 #textureCanvas {
-  width: 30vw;
-  height: 30vw;
+  width: 50vw;
+  height: 50vw;
   background-color: black;
+  visibility: none;
 }
 
 #mainCanvas {
-  width: 30vw;
-  height: 30vw;
+  width: min(100vh, 100vh);
+  height: min(100vh, 100vh);
 }
 
 #penCanvas {
