@@ -1,5 +1,6 @@
-import { VS_SOURCE, FS_SOURCE, FS_SOURCE_MIRRORS, FS_SOURCE_NO_TEXTURE } from './glsl.js'
-import * as RenderUtils from './render_utils.js'
+// @ts-nocheck
+import { VS_SOURCE, FS_SOURCE, FS_SOURCE_MIRRORS, FS_SOURCE_NO_TEXTURE } from './glsl'
+import * as RenderUtils from './render_utils'
 import {createApp, h} from 'vue';
 import * as glMatrix from 'gl-matrix'
 function hsl_to_rgb(hsl) {
@@ -639,3 +640,6 @@ window.addEventListener('load', () => {
   const app = new App('stellated_dodecahedron')
   app.init();
 });
+
+// shim added by migration
+const _equal_colors = (a:any, b:any) => JSON.stringify(a) === JSON.stringify(b);

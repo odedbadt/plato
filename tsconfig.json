@@ -2,39 +2,31 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
-    "moduleResolution": "bundler", // good with webpack/vite + ESM
+    "moduleResolution": "bundler",
     "lib": [
       "ES2022",
       "DOM",
       "DOM.Iterable"
     ],
-    "allowJs": true,
-    "checkJs": false,
-    "noEmit": true,
-    "strict": false, // TEMP: off – turn on later per-folder
+    "noEmit": false,
     "skipLibCheck": true,
+    "strict": false,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "useDefineForClassFields": false, // matches JS field semantics
     "resolveJsonModule": true,
     "types": [
       "node",
       "webpack-env"
     ],
-    "baseUrl": ".",
-    "paths": {
-      "@/*": [
-        "src/*"
-      ]
-    }
+    "baseUrl": "."
   },
   "include": [
     "src/**/*",
     "types/**/*.d.ts"
   ],
   "exclude": [
-    "node_modules",
     "dist",
-    "distro"
+    "distro",
+    "node_modules"
   ]
 }

@@ -1,13 +1,19 @@
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export default {
   entry: './src/ts/app.ts',
   output: {
+    clean: true,
     path: path.resolve('dist'),
     filename: 'bundle.js',
   },
   resolve: {
-    extensions: ['.ts', '.js'],
+    alias: { '@': path.resolve(__dirname, 'src') },
+    extensions: ['.ts', '.tsx', '.js'],
   },
   module: {
     rules: [

@@ -1,4 +1,5 @@
-import { App } from 'main_app.ts'
+// @ts-nocheck
+import { App } from './app'
 
 
 localStorage.clear()

@@ -2,6 +2,7 @@
   "type": "module",
   "devDependencies": {
     "@types/node": "^22.14.1",
+    "@types/webpack-env": "^1.18.8",
     "fft.js": "^4.0.4",
     "mathjs": "^14.0.1",
     "ts-loader": "^9.5.2",

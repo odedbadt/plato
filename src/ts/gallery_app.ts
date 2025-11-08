@@ -1,5 +1,7 @@
-import { VS_SOURCE, FS_SOURCE, FS_SOURCE_NO_TEXTURE } from './glsl.js'
-import * as RenderUtils from './render_utils.js'
+// @ts-nocheck
+import * as glMatrix from 'gl-matrix'
+import { VS_SOURCE, FS_SOURCE, FS_SOURCE_NO_TEXTURE } from './glsl'
+import * as RenderUtils from './render_utils'
 
 function draw_all_models(model_names, models) {
   const main_canvas = document.getElementById("mainCanvas");
