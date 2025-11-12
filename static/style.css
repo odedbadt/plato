@@ -1,9 +1,17 @@
 body {
   display: grid;
-  grid-template-columns: min(100vh, 100vh) min(100vh, 100vh);
+  grid-template-columns: min(10vh, 10vh) min(100vh, 100vh);
   grid-template-rows: 80vh;
   background-color: black;
   font-family: monospace;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overscroll-behavior: contain;
+  /* reduces pull-to-refresh/bounce */
 }
 
 #v-div-1 {
@@ -15,15 +23,16 @@ canvas {
 }
 
 #textureCanvas {
-  width: 50vw;
-  height: 50vw;
+  width: min(10vh, 10vh);
+  height: min(10vh, 10vh);
   background-color: black;
   visibility: none;
 }
 
 #mainCanvas {
-  width: min(100vh, 100vh);
-  height: min(100vh, 100vh);
+  width: min(10vh, 10vh);
+  height: min(10vh, 10vh);
+  touch-action: none;
 }
 
 #penCanvas {

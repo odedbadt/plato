@@ -369,7 +369,7 @@ export class App {
       const texture_canvas = this.texture_canvas;
       const texture_canvas_element = document.getElementById('textureCanvas');
       const texture_canvas_context = texture_canvas_element.getContext('2d', { 'willReadFrequently': true });
-      const coords = this.mouse_event_to_coordinates(event);
+      const coords = this.pointer_event_to_coordinates(event);
       const w = texture_canvas_element.width;
       const h = texture_canvas_element.height;
       const replaced_color = texture_canvas_context.getImageData(coords[0], coords[1], 1, 1).data;
@@ -424,7 +424,7 @@ export class App {
     this.draw_pen_selector();
     const slope = pen_canvas_rect.width / 2 / pen_canvas_rect.height;
     const _this = this;
-    pen_canvas.addEventListener("mousemove", (event) => {
+    pen_canvas.addEventListener("pointermove", (event) => {
       if (event.buttons) {
         const pen_canvas_y = event.offsetY;
         this.pen_radius = pen_canvas_y * slope / 2;
@@ -444,7 +444,7 @@ export class App {
     // texture_context.fillStyle = '#0000';
     this.is_dirty = true;
   }
-  mouse_event_to_coordinates = (event) => {
+  pointer_event_to_coordinates = (event) => {
     const canvas_x = event.offsetX;
     const canvas_y = event.offsetY;
     return [canvas_x * this.dpr, canvas_y * this.dpr];
@@ -476,7 +476,7 @@ export class App {
     const w = texture_canvas.width;
     const h = texture_canvas.height;
     const dpr = this.dpr;
-    const mouse_event_to_coordinates = (event) => {
+    const pointer_event_to_coordinates = (event) => {
       const canvas_x = event.offsetX;
       const canvas_y = event.offsetY;
       return [canvas_x * dpr, canvas_y * dpr];
@@ -490,13 +490,13 @@ export class App {
     }
     const _this = this;
 
-    model_canvas.addEventListener("mousedown", (event) => {
+    model_canvas.addEventListener("pointerdown", (event) => {
       this.path = new Path2D();
       this.mirror_path = new Path2D();
       texture_context.strokeStyle = 'black'
       texture_context.fillStyle = this.pen_color;
       texture_context.lineWidth = 1;
-      const coords = this.mouse_event_to_coordinates(event);
+      const coords = this.pointer_event_to_coordinates(event);
       this.prev_coords = [coords[0], coords[1]]
       const mirror_coords = mirror_coordinates(coords);
 
@@ -511,7 +511,8 @@ export class App {
       this.path.moveTo(coords[0], coords[1])
       this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1])
     })
-    model_canvas.addEventListener("mouseup", (event) => {
+    model_canvas.addEventListener("pointerup", (event) => {
+      event.preventDefault();
       if (this.path) {
         texture_context.lineWidth = this.pen_radius;
         texture_context.beginPath();
@@ -521,10 +522,11 @@ export class App {
         texture_context.stroke(this.mirror_path);
         this.mirror_path = null;
       }
-      this.prev_coords = this.mouse_event_to_coordinates(event);
+      this.prev_coords = this.pointer_event_to_coordinates(event);
     })
-    model_canvas.addEventListener("mousemove", (event) => {
-      const coords = this.mouse_event_to_coordinates(event);
+    model_canvas.addEventListener("pointermove", (event) => {
+      event.preventDefault();
+      const coords = this.pointer_event_to_coordinates(event);
       const mirror_coords = mirror_coordinates(coords);
       if (event.buttons) {
         if (!!(this.prev_coords && this.path && this.mirror_path)) {
