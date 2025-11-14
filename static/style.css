@@ -1,6 +1,10 @@
+:root {
+  --size: min(100vh, 100vw);
+}
+
 body {
   display: grid;
-  grid-template-columns: min(10vh, 10vh) min(100vh, 100vh);
+  grid-template-columns: --size;
   grid-template-rows: 80vh;
   background-color: black;
   font-family: monospace;
@@ -23,16 +27,17 @@ canvas {
 }
 
 #textureCanvas {
-  width: min(10vh, 10vh);
-  height: min(10vh, 10vh);
+  width: var(--size);
+  height: var(--size);
   background-color: black;
   visibility: none;
 }
 
 #mainCanvas {
-  width: min(10vh, 10vh);
-  height: min(10vh, 10vh);
+  width: --size;
+  height: --size;
   touch-action: none;
+  cursor: crosshair;
 }
 
 #penCanvas {

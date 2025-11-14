@@ -1,0 +1,95 @@
+<!doctype html>
+<!--
+ Copyright 2021 Google LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+<html>
+
+<head>
+  <title>Museum of polyhedra</title>
+  <link type="text/css" rel="stylesheet" href="static/mobile_style.css">
+  <link rel="icon" type="image/x-icon" href="static/favicon.png">
+  <script src="dist/bundle.js" defer></script>
+</head>
+
+<body>
+
+  <canvas id="mainCanvas"></canvas>
+  <div id="v-div-2">
+    <canvas id="textureCanvas"></canvas>
+    <div id="buttons">
+      <div class="color color-1"></div>
+      <div class="color color-2"></div>
+      <div class="color color-3"></div>
+      <div class="color color-4"></div>
+      <div class="color color-5"></div>
+      <div class="color color-6"></div>
+      <div class="color color-7"></div>
+      <div class="color color-8"></div>
+      <div class="color color-9"></div>
+      <div class="color color-10"></div>
+      <div class="color color-11"></div>
+      <div class="color color-12"></div>
+      <div class="color color-13"></div>
+      <div class="color color-14"></div>
+      <div class="color color-15"></div>
+      <div class="color color-16"></div>
+      <div class="action action-1 pen-size pen-size-1">
+        <svg width="20" height="20" style="background-color:white;border: 1px solid #ccc;">
+          <circle cx="10" cy="10" r="1" fill="black" />
+        </svg>
+      </div>
+      <div class="action action-2 pen-size pen-size-2">
+        <svg width="20" height="20" style="background-color:white;border: 1px solid #ccc;">
+          <circle cx="10" cy="10" r="5" fill="black" />
+        </svg>
+
+      </div>
+      <div class="action action-3 pen-size pen-size-25">
+        <svg width="20" height="20" style="background-color:white;border: 1px solid #ccc;">
+          <circle cx="10" cy="10" r="10" fill="black" />
+        </svg>
+
+      </div>
+      <div class="action action-4" id="floodfill"></div>
+      <div id="clear-canvas-button" class="action action-4"></div>
+    </div>
+  </div>
+  <div id="shape-name" style="display:none"></div>
+  <div id="v-div-1">
+    <div id="model-select-container"></div>
+    <fieldset id="rendering-options">
+      <legend>Rendering options:</legend>
+      <div>
+        <input type="checkbox" id="model" checked=true name="model" value="model">
+        <label for="model">Model</label>
+      </div>
+      <div>
+        <input type="radio" id="generating-mirrors" name="mirrors" value="generating-mirrors">
+        <label for="generating-mirrors">Generating mirrors only</label>
+      </div>
+      <div>
+        <input type="radio" id="all-mirrors" name="mirrors" value="all-mirrors">
+        <label for="all-mirrors">All mirrors</label>
+      </div>
+      <div>
+        <input type="radio" id="no-mirrors" name="mirrors" value="no-mirrors">
+        <label for="no-mirrors">No mirrors</label>
+      </div>
+    </fieldset>
+  </div>
+</body>
+
+</html>

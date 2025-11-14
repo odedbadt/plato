@@ -155,7 +155,7 @@ export function bind_data_to_shaders(gl, model, shaderProgram) {
       shaderProgram, "aVertexColor");
     //window.bound_locations.push(vertexColorPosition)
 
-    console.log(vertexPosition, vertexColorPosition, gl.getError());
+    //console.log(vertexPosition, vertexColorPosition, gl.getError());
 
     gl.enableVertexAttribArray(vertexColorPosition);
     gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
@@ -211,25 +211,33 @@ export function build_program(gl, vsSource, fsSource, has_texture,
 }
 
 export function bindTextureToProgram(gl, texture_canvas) {
+  // NOP version for profiling — skip all CPU↔GPU transfers
   const texture = gl.createTexture();
-  const texture_context = texture_canvas.getContext('2d', { willReadFrequently: true });
-
-  const imageData = texture_canvas && texture_context ?
-    texture_context.getImageData(0, 0, texture_canvas.width, texture_canvas.height)
-    : new ImageData(new Uint8ClampedArray([255, 255, 255, 255]), 1, 1);
 
   gl.bindTexture(gl.TEXTURE_2D, texture);
+  // Upload a single white pixel instead of the real canvas
+  const whitePixel = new Uint8Array([255, 255, 255, 255]);
   gl.texImage2D(
     gl.TEXTURE_2D,
     0,
     gl.RGBA,
+    1,
+    1,
+    0,
     gl.RGBA,
     gl.UNSIGNED_BYTE,
-    imageData
+    whitePixel
   );
-  gl.bindTexture(gl.TEXTURE_2D, texture);
+
+  // Minimal sane params so the shader sampling works
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
   return texture;
 }
+
 export function draw_model(gl, shader_program, uniforms, model, vertex_count) {
   if (model.vertices && vertex_count && vertex_count != model.vertices.length * 3) {
     throw new Exception(`Bad vertex count ${vertex_count} != ${model.vertices.length}*3} `)
@@ -241,17 +249,24 @@ export function draw_model(gl, shader_program, uniforms, model, vertex_count) {
     throw new Exception(`Bad normal count, vertices:${model.vertices.length} != normals:${model.normals.length}`)
   }
 
+  gl.useProgram(shader_program);
+
+
   Object.entries(uniforms).forEach((entry) => {
     const name = entry[0]
     const type: string = entry[1].type as string
     const value = entry[1].value
     const uniform_location = gl.getUniformLocation(shader_program, name);
     if (uniform_location != -1) {
-      gl[type](uniform_location, false, value);
+      if (type.match(/.*Matrix.*/)) {
+        gl[type](uniform_location, false, value);
+      } else {
+        gl[type](uniform_location, value);
+      }
     }
   })
   bind_data_to_shaders(gl, model, shader_program);
-  gl.useProgram(shader_program);
+
   gl.drawArrays(gl.TRIANGLES, 0, vertex_count || model.vertices.length / 3);
   unbind_data(gl);
 };

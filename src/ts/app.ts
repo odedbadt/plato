@@ -92,14 +92,13 @@ export class App {
   constructor(prefered_model_name, spinning_speed, pen_color, pen_radius) {
     this.prefered_model_name = prefered_model_name;
     this.model = model;
-    this.spinning_speed = spinning_speed || 0;
-    this.is_spinning = this.spinning_speed && this.spinning_speed > 0;
+    this.spinning_speed = 0;
     this.alpha = 0;
-    this.pen_color = pen_color || 'blue'
+    this.pen_color = pen_color || 'green'
     this.pen_radius = pen_radius || 5
     this.dpr = window.devicePixelRatio;
-    this.spinning_speed = 0.035;
-    this.is_spinning = false;
+    this.set_spinning_speed(.035);
+    this.is_spinning = true;
     this.cache = localStorage;
   }
   construct_url_for_name(model_name) {
@@ -125,6 +124,7 @@ export class App {
     this.clear();
     this.init_palette();
     this.init_texture_sketcher();
+    this.init_overlay_opacity_throttle();
     this.init_actions();
     const model_entries = [];
     let prefered_model_name_there = false;
@@ -197,9 +197,9 @@ export class App {
       });
       const main_canvas = document.getElementById("mainCanvas");
 
-      main_canvas.addEventListener("click", (event) => {
-        _this.is_spinning = !_this.is_spinning;
-      })
+      // main_canvas.addEventListener("click", (event) => {
+      //   _this.is_spinning = !_this.is_spinning;
+      // })
 
 
     })
@@ -211,9 +211,11 @@ export class App {
         _this.draw_model()
       }
 
+      //setTimeout(animate, 100)
       requestAnimationFrame(animate)
     }
     requestAnimationFrame(animate)
+    //setTimeout(animate, 100)
   }
   load_model(model_url, callback) {
     if (this.cache.getItem(model_url)) {
@@ -301,6 +303,29 @@ export class App {
       _this.is_spinning = !_this.is_spinning
     })
   };
+  reset_opacity_to_opaque() {
+    this.overlay_transparency = 0.9
+    this.overlay_transparency_decay_factor = 0.6
+    this.overlay_countdown = 50
+
+  }
+  init_overlay_opacity_throttle() {
+    this.reset_opacity_to_opaque()
+    this.overlay_transparency = 0.9
+    this.overlay_countdown = 1000
+    setInterval(() => {
+      if (this.overlay_countdown > 0) {
+        this.overlay_countdown = this.overlay_countdown - 10
+      } else {
+        this.overlay_transparency = this.overlay_transparency *
+          this.overlay_transparency_decay_factor
+        this.is_dirty = true;
+      }
+    }, 100)
+
+
+
+  }
   init_canvas_sizes() {
     const dpr = this.dpr;
     const _this = this;
@@ -491,6 +516,8 @@ export class App {
     const _this = this;
 
     model_canvas.addEventListener("pointerdown", (event) => {
+      this.overlay_transparency = 0.9
+      this.overlay_countdown = 500
       this.path = new Path2D();
       this.mirror_path = new Path2D();
       texture_context.strokeStyle = 'black'
@@ -529,6 +556,7 @@ export class App {
       const coords = this.pointer_event_to_coordinates(event);
       const mirror_coords = mirror_coordinates(coords);
       if (event.buttons) {
+        this.reset_opacity_to_opaque()
         if (!!(this.prev_coords && this.path && this.mirror_path)) {
           if (dist2(coords, this.prev_coords) * dpr * dpr > 10) {
             this.path.lineTo(coords[0], coords[1]);
@@ -632,7 +660,10 @@ export class App {
     const overlay_shader_program = RenderUtils.build_program(main_gl,
       Glsl.VS_SOURCE_OVERLAY, Glsl.FS_SOURCE_OVERLAY, false,
       0, 0);
-    RenderUtils.draw_model(main_gl, overlay_shader_program, {},
+    RenderUtils.draw_model(main_gl, overlay_shader_program,
+      {
+        "uOpacity": { type: "uniform1f", value: this.overlay_transparency }
+      },
       {
         "vertices": [
           -1, -1, -1,
