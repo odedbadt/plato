@@ -1,7 +1,6 @@
 // @ts-nocheck
 import * as Glsl from './glsl'
 
-import * as RenderUtils from './render_utils'
 import { createApp, h } from 'vue';
 import * as glMatrix from 'gl-matrix'
 // shim added by migration
@@ -89,7 +88,7 @@ function _floodfill(read_context, write_context,
   write_context.putImageData(context_image_data, 0, 0);
 }
 export class App {
-  constructor(prefered_model_name, spinning_speed, pen_color, pen_radius) {
+  constructor(prefered_model_name, spinning_speed = 0, pen_color = null, pen_radius = null) {
     this.prefered_model_name = prefered_model_name;
     this.model = model;
     this.spinning_speed = 0;

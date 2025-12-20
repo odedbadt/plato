@@ -2,13 +2,13 @@
 import * as glMatrix from 'gl-matrix'
 import type { Rect } from "@oded/tsutils/vec2";
 
-type Uniforms = {
+export type Uniforms = {
     [key: string]: {
         type: string,
         value: any
     }
 }
-type Model = {
+export type Model = {
     vertices: Array<number>,
     colors?: Array<number>,
     normals?: Array<number>,
@@ -17,7 +17,34 @@ type Model = {
 function isPowerOf2(value: number) {
     return (value & (value - 1)) === 0;
 }
+export matrix_uniforms(alpha: number): Uniforms {
+    const x_axis = new Float32Array([1, 0, 0]);
+    const y_axis = new Float32Array([0, 1, 0]);
 
+    const rotation_matrix_4x4 = glMatrix.mat4.create();
+    glMatrix.mat4.rotate(rotation_matrix_4x4, rotation_matrix_4x4, alpha, y_axis);
+    glMatrix.mat4.rotate(rotation_matrix_4x4, rotation_matrix_4x4, Math.PI / 3, x_axis);
+
+    const viewMatrix = glMatrix.mat4.create();
+    glMatrix.mat4.lookAt(viewMatrix, [0, -.1, 5], [0, -.1, 0], [0, 1, 0]);
+    const projectionMatrix = glMatrix.mat4.create();
+    glMatrix.mat4.perspective(projectionMatrix, Math.PI * 0.15, 1, 1, 10.0);
+
+    glMatrix.mat4.multiply(projectionMatrix, projectionMatrix, viewMatrix)
+
+    const rotationMatrix3x3 = glMatrix.mat3.create();
+    glMatrix.mat3.fromMat4(rotationMatrix3x3, rotation_matrix_4x4);
+    return {
+        "projector": {
+            type: 'uniformMatrix4fv',
+            value: projectionMatrix
+        },
+        "model_transformer": {
+            type: 'uniformMatrix3fv',
+            value: rotationMatrix3x3
+        },
+    }
+}
 export function create_vertex_buffer(gl: WebGLRenderingContext, vertices: Array<number>): WebGLBuffer {
     const vertexBuffer = gl.createBuffer();
     if (!vertexBuffer) {
@@ -235,7 +262,7 @@ export function create_texture_from_canvas(gl: WebGLRenderingContext,
         : new ImageData(new Uint8ClampedArray([255, 255, 255, 255]), 1, 1);
 
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(
+    gl.texImage2D(cursorWordLeftSelect
         gl.TEXTURE_2D,
         0,
         gl.RGBA,
@@ -246,15 +273,11 @@ export function create_texture_from_canvas(gl: WebGLRenderingContext,
     gl.bindTexture(gl.TEXTURE_2D, texture);
     return texture;
 }
-export function draw_model(gl: WebGLRenderingContext, shader_program: WebGLShader, uniforms: Uniforms, model: any, vertex_count: number) {
-    if (model.vertices && vertex_count && vertex_count != model.vertices.length * 3) {
-        throw new Error(`Bad vertex count ${vertex_count} != ${model.vertices.length}*3} `)
-    }
-    if (model.normals && vertex_count && vertex_count != model.normals.length * 3) {
-        throw new Error(`Bad normal count, vertex count: ${vertex_count} != ${model.normals.length}*9}`)
-    }
+
+export function draw_webgl_model(gl: WebGLRenderingContext, model: Model, shader_program: WebGLShader, uniforms: Uniforms = []) {
+
     if (model.vertices && model.normals && model.vertices.length != model.normals.length) {
-        throw new Error(`Bad normal count, vertices:${model.vertices.length} != normals:${model.normals.length}`)
+        throw new Error(`Bad normal count, vertices: ${model.vertices.length} != normals: ${model.normals.length}`)
     }
 
     Object.entries(uniforms).forEach((entry) => {
