@@ -1,32 +1,24 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ES2020",
     "module": "ESNext",
-    "moduleResolution": "bundler",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
-    "noEmit": false,
-    "skipLibCheck": true,
-    "strict": false,
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "resolveJsonModule": true,
-    "types": [
-      "node",
-      "webpack-env"
-    ],
-    "baseUrl": "."
+    "moduleResolution": "Bundler",
+    "rootDir": "src/ts",
+    "outDir": "dist",
+    "declaration": true,
+    "declarationMap": true,
+    "inlineSourceMap": false,
+    "sourceMap": true,
+    "composite": true,
+    "strict": true,
+    "tsBuildInfoFile": "./.tsbuildinfo",
   },
-  "include": [
-    "src/**/*",
-    "types/**/*.d.ts"
+  "references": [
+    {
+      "path": "../tsutils"
+    }
   ],
-  "exclude": [
-    "dist",
-    "distro",
-    "node_modules"
+  "include": [
+    "src/ts"
   ]
 }

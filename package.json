@@ -1,22 +1,19 @@
 {
+  "name": "@oded/plato",
+  "version": "0.1.0",
   "type": "module",
-  "devDependencies": {
-    "@types/node": "^22.14.1",
-    "@types/webpack-env": "^1.18.8",
-    "fft.js": "^4.0.4",
-    "mathjs": "^14.0.1",
-    "ts-loader": "^9.5.2",
-    "typescript": "^5.8.3",
-    "webpack-cli": "^6.0.1",
-    "webpack-dev-server": "^5.2.2"
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
   },
   "dependencies": {
-    "gl-matrix": "^3.4.3",
-    "three": "^0.172.0",
-    "vue": "^3.5.13",
-    "webpack": "^5.97.1"
+    "@oded/tsutils": "workspace:*"
   },
   "scripts": {
-    "build": "npx webpack"
+    "build": "tsc -b"
   }
 }
