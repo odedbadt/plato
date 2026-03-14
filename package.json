@@ -11,7 +11,8 @@
     }
   },
   "dependencies": {
-    "@oded/tsutils": "workspace:*"
+    "@oded/tsutils": "workspace:*",
+    "three": "^0.160.1"
   },
   "scripts": {
     "build": "tsc -b"

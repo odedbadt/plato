@@ -1,5 +1,4 @@
-export const VS_SOURCE = `#version 300 es
-precision mediump float;
+export const VS_SOURCE = `precision mediump float;
 
 in vec3 aVertexPosition;
 in vec3 aNormalDirection;
@@ -25,8 +24,7 @@ void main(void) {
                             normalize(lightDirection));
 }
 `
-export const FS_SOURCE = `#version 300 es
-precision mediump float;
+export const FS_SOURCE = `precision mediump float;
 in vec2 vTextureCoord;
 in float fBrightness;
 
@@ -46,8 +44,7 @@ void main(void) {
 `
 
 
-export const FS_SOURCE_MIRRORS = `#version 300 es
-precision mediump float;
+export const FS_SOURCE_MIRRORS = `precision mediump float;
 in vec2 vTextureCoord;
 in float fBrightness;
 
@@ -58,8 +55,7 @@ void main(void) {
   fragColor = vec4(vec3(0.5,0.9,1.0)*fBrightness,0.5);
 }
 `
-export const VS_SOURCE_OVERLAY = `#version 300 es
-in vec3 aVertexPosition;
+export const VS_SOURCE_OVERLAY = `in vec3 aVertexPosition;
 in vec2 aTextureCoord;
 
 out vec2 vTextureCoord;
@@ -71,8 +67,7 @@ void main(void) {
 
 }
 `
-export const FS_SOURCE_OVERLAY = `#version 300 es
-precision mediump float;
+export const FS_SOURCE_OVERLAY = `precision mediump float;
 in vec2 vTextureCoord;
 
 out vec4 fragColor;

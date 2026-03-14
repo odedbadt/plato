@@ -1,79 +1,133 @@
+import * as THREE from 'three'
 import * as Glsl from './glsl'
-import * as webgl_utils from './webgl_utils'
-import type { Rect } from "@oded/tsutils/vec2";
+import { Model, Uniforms, model_to_geometry, create_canvas_texture } from './webgl_utils'
 
-// WebglRenderer: Stateful bridge that caches shader programs and orchestrates draw calls
-// webgl_utils remains stateless - this class manages the GL state lifecycle
+// WebglRenderer: Stateful bridge using Three.js WebGLRenderer
+// webgl_utils provides geometry/texture helpers; this class owns the scene lifecycle
 export class WebglRenderer {
-  gl: WebGL2RenderingContext;
+  renderer: THREE.WebGLRenderer;
   texture_canvas: HTMLCanvasElement;
-
-  // Cached shader programs - built once, reused every frame
-  main_shader_program: WebGLProgram | null = null;
-  mirror_shader_program: WebGLProgram | null = null;
-  overlay_shader_program: WebGLProgram | null = null;
-
-  // Texture dirty tracking
+  texture: THREE.CanvasTexture;
   texture_dirty: boolean = true;
+
+  // Per-pass materials - built once, uniforms updated each frame
+  main_material: THREE.RawShaderMaterial;
+  mirror_material: THREE.RawShaderMaterial;
+  overlay_material: THREE.RawShaderMaterial;
+
+  scene: THREE.Scene;
+  camera: THREE.Camera;
 
   constructor(main_canvas: HTMLCanvasElement, texture_canvas: HTMLCanvasElement) {
     this.texture_canvas = texture_canvas;
-    const gl = main_canvas.getContext("webgl2");
-    if (!gl) {
-      throw new Error("WebGL2 not supported");
-    }
-    this.gl = gl;
+    this.renderer = new THREE.WebGLRenderer({ canvas: main_canvas, alpha: true });
+    this.renderer.autoClear = false;
 
-    // Build and cache all shader programs once
-    this.main_shader_program = webgl_utils.build_program(gl, Glsl.VS_SOURCE, Glsl.FS_SOURCE);
-    this.mirror_shader_program = webgl_utils.build_program(gl, Glsl.VS_SOURCE, Glsl.FS_SOURCE_MIRRORS);
-    this.overlay_shader_program = webgl_utils.build_program(gl, Glsl.VS_SOURCE_OVERLAY, Glsl.FS_SOURCE_OVERLAY);
+    this.texture = create_canvas_texture(texture_canvas);
+
+    this.main_material = new THREE.RawShaderMaterial({
+      vertexShader: Glsl.VS_SOURCE,
+      fragmentShader: Glsl.FS_SOURCE,
+      uniforms: {
+        projector: { value: null },
+        model_transformer: { value: null },
+        uTexture: { value: this.texture },
+      },
+      glslVersion: THREE.GLSL3,
+      transparent: true,
+      depthTest: true,
+      depthWrite: true,
+      side: THREE.DoubleSide,
+      blending: THREE.NormalBlending,
+    });
+
+    this.mirror_material = new THREE.RawShaderMaterial({
+      vertexShader: Glsl.VS_SOURCE,
+      fragmentShader: Glsl.FS_SOURCE_MIRRORS,
+      uniforms: {
+        projector: { value: null },
+        model_transformer: { value: null },
+        uTexture: { value: this.texture },
+      },
+      glslVersion: THREE.GLSL3,
+      transparent: true,
+      depthTest: true,
+      depthWrite: true,
+      side: THREE.DoubleSide,
+      blending: THREE.NormalBlending,
+    });
+
+    this.overlay_material = new THREE.RawShaderMaterial({
+      vertexShader: Glsl.VS_SOURCE_OVERLAY,
+      fragmentShader: Glsl.FS_SOURCE_OVERLAY,
+      uniforms: {
+        uTexture: { value: this.texture },
+        uOpacity: { value: 1.0 },
+      },
+      glslVersion: THREE.GLSL3,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.NormalBlending,
+    });
+
+    this.scene = new THREE.Scene();
+    // Identity camera - projection is handled entirely by the 'projector' uniform
+    this.camera = new THREE.Camera();
   }
 
-  // Mark texture as needing refresh
   mark_texture_dirty() {
     this.texture_dirty = true;
   }
 
-  // Refresh texture from canvas (only if dirty)
   refresh_texture() {
     if (this.texture_dirty) {
-      webgl_utils.create_texture_from_canvas(this.gl, this.texture_canvas);
+      this.texture.needsUpdate = true;
       this.texture_dirty = false;
     }
   }
 
-  // Begin frame - setup GL state
   begin_frame() {
-    webgl_utils.setup_render_state(this.gl);
+    const canvas = this.renderer.domElement;
+    this.renderer.setViewport(0, 0, canvas.width, canvas.height);
+    this.renderer.setClearColor(0x000000, 0);
+    this.renderer.clear(true, true, false);
   }
 
-  // End frame - cleanup GL state
   end_frame() {
-    webgl_utils.unbind_data(this.gl);
+    // Three.js manages GL state cleanup internally
   }
 
-  // Draw model with cached main shader
-  draw_model(model: webgl_utils.Model, uniforms: webgl_utils.Uniforms) {
-    if (this.main_shader_program) {
-      webgl_utils.draw_webgl_model(this.gl, model, this.main_shader_program, uniforms);
+  private render_pass(geometry: THREE.BufferGeometry, material: THREE.RawShaderMaterial) {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.frustumCulled = false;
+    this.scene.clear();
+    this.scene.add(mesh);
+    this.renderer.render(this.scene, this.camera);
+    geometry.dispose();
+  }
+
+  private apply_uniforms(material: THREE.RawShaderMaterial, uniforms: Uniforms) {
+    for (const [key, entry] of Object.entries(uniforms)) {
+      if (key in material.uniforms) {
+        material.uniforms[key].value = entry.value;
+      }
     }
   }
 
-  // Draw mirrors with cached mirror shader
-  draw_mirrors(model: webgl_utils.Model, uniforms: webgl_utils.Uniforms) {
-    if (this.mirror_shader_program) {
-      webgl_utils.draw_webgl_model(this.gl, model, this.mirror_shader_program, uniforms);
-    }
+  draw_model(model: Model, uniforms: Uniforms) {
+    this.apply_uniforms(this.main_material, uniforms);
+    this.render_pass(model_to_geometry(model), this.main_material);
   }
 
-  // Draw overlay with cached overlay shader
-  draw_overlay(model: webgl_utils.Model, uniforms: webgl_utils.Uniforms) {
-    if (this.overlay_shader_program) {
-      // Disable depth test for overlay - it should always be on top
-      this.gl.disable(this.gl.DEPTH_TEST);
-      webgl_utils.draw_webgl_model(this.gl, model, this.overlay_shader_program, uniforms);
-      this.gl.enable(this.gl.DEPTH_TEST);
-    }
+  draw_mirrors(model: Model, uniforms: Uniforms) {
+    this.apply_uniforms(this.mirror_material, uniforms);
+    this.render_pass(model_to_geometry(model), this.mirror_material);
+  }
+
+  draw_overlay(model: Model, uniforms: Uniforms) {
+    this.apply_uniforms(this.overlay_material, uniforms);
+    this.render_pass(model_to_geometry(model), this.overlay_material);
   }
 }
