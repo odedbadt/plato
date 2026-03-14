@@ -18,6 +18,7 @@
 <html>
 
 <head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Museum of polyhedra</title>
   <link type="text/css" rel="stylesheet" href="static/style.css">
   <link rel="icon" type="image/x-icon" href="static/favicon.png">
@@ -25,10 +26,14 @@
 </head>
 
 <body>
-
   <canvas id="mainCanvas"></canvas>
-  <div id="v-div-2">
-    <canvas id="textureCanvas"></canvas>
+  <canvas id="textureCanvas"></canvas>
+
+  <!-- Toggle button for controls -->
+  <button id="controls-toggle">☰</button>
+
+  <!-- Controls panel -->
+  <div id="controls-panel" class="hidden">
     <div id="buttons">
       <div class="color color-1"></div>
       <div class="color color-2"></div>
@@ -47,49 +52,54 @@
       <div class="color color-15"></div>
       <div class="color color-16"></div>
       <div class="action action-1 pen-size pen-size-1">
-        <svg width="20" height="20" style="background-color:white;border: 1px solid #ccc;">
+        <svg viewBox="0 0 20 20" style="background-color:white;border: 1px solid #ccc;">
           <circle cx="10" cy="10" r="1" fill="black" />
         </svg>
       </div>
       <div class="action action-2 pen-size pen-size-2">
-        <svg width="20" height="20" style="background-color:white;border: 1px solid #ccc;">
+        <svg viewBox="0 0 20 20" style="background-color:white;border: 1px solid #ccc;">
           <circle cx="10" cy="10" r="5" fill="black" />
         </svg>
-
       </div>
       <div class="action action-3 pen-size pen-size-25">
-        <svg width="20" height="20" style="background-color:white;border: 1px solid #ccc;">
+        <svg viewBox="0 0 20 20" style="background-color:white;border: 1px solid #ccc;">
           <circle cx="10" cy="10" r="10" fill="black" />
         </svg>
-
       </div>
       <div class="action action-4" id="floodfill"></div>
-      <div id="clear-canvas-button" class="action action-4"></div>
+      <div id="clear-canvas-button" class="action action-5"></div>
+      <input type="color" id="color-picker" class="action" value="#ff0000">
+    </div>
+    <div id="v-div-1">
+      <div id="model-select-container"></div>
+      <fieldset id="rendering-options">
+        <legend>Rendering options:</legend>
+        <div>
+          <input type="checkbox" id="model" checked=true name="model" value="model">
+          <label for="model">Model</label>
+        </div>
+        <div>
+          <input type="radio" id="generating-mirrors" name="mirrors" value="generating-mirrors">
+          <label for="generating-mirrors">Generating mirrors only</label>
+        </div>
+        <div>
+          <input type="radio" id="all-mirrors" name="mirrors" value="all-mirrors">
+          <label for="all-mirrors">All mirrors</label>
+        </div>
+        <div>
+          <input type="radio" id="no-mirrors" name="mirrors" value="no-mirrors">
+          <label for="no-mirrors">No mirrors</label>
+        </div>
+      </fieldset>
     </div>
   </div>
   <div id="shape-name" style="display:none"></div>
-  <div id="v-div-1">
-    <div id="model-select-container"></div>
-    <fieldset id="rendering-options">
-      <legend>Rendering options:</legend>
-      <div>
-        <input type="checkbox" id="model" checked=true name="model" value="model">
-        <label for="model">Model</label>
-      </div>
-      <div>
-        <input type="radio" id="generating-mirrors" name="mirrors" value="generating-mirrors">
-        <label for="generating-mirrors">Generating mirrors only</label>
-      </div>
-      <div>
-        <input type="radio" id="all-mirrors" name="mirrors" value="all-mirrors">
-        <label for="all-mirrors">All mirrors</label>
-      </div>
-      <div>
-        <input type="radio" id="no-mirrors" name="mirrors" value="no-mirrors">
-        <label for="no-mirrors">No mirrors</label>
-      </div>
-    </fieldset>
-  </div>
+
+  <script>
+    document.getElementById('controls-toggle').addEventListener('click', function() {
+      document.getElementById('controls-panel').classList.toggle('hidden');
+    });
+  </script>
 </body>
 
 </html>

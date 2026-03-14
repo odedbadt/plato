@@ -1,221 +1,244 @@
 :root {
-  --size: min(100vh, 100vw);
+  --canvas-size: min(100vh, 100vw);
 }
 
-body {
-  display: grid;
-  grid-template-columns: --size;
-  grid-template-rows: 80vh;
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
   background-color: black;
   font-family: monospace;
 }
 
-html,
-body {
-  margin: 0;
-  height: 100%;
-  overscroll-behavior: contain;
-  /* reduces pull-to-refresh/bounce */
-}
-
-#v-div-1 {
-  display: none;
-}
-
-canvas {
-  cursor: crosshair;
-}
-
-#textureCanvas {
-  width: var(--size);
-  height: var(--size);
-  background-color: black;
-  visibility: none;
-}
-
+/* Main 3D canvas - fullscreen */
 #mainCanvas {
-  width: --size;
-  height: --size;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
   touch-action: none;
   cursor: crosshair;
 }
 
-#penCanvas {
-  width: 0vw;
-  height: 30vh;
+/* Texture canvas - same size, used for drawing texture */
+#textureCanvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  opacity: 0;
+  pointer-events: none;
 }
 
-#v-div-0 {
-  display: grid;
-  grid-template-rows: 16em calc(80vh - 16em);
-}
-
-#v-div-1 {
-  display: grid;
-  grid-template-rows: 3em 13em;
-  height: 16em;
-}
-
-#rendering-options {
-  height: 16em;
-}
-
-#h-div-1 {
-  display: grid;
-  grid-template-columns: 10vw 0vw;
-}
-
-#model-select {
-  height: 3em;
-  width: 10vw;
-}
-
-#penCanvas {
-  width: 10vw;
-  height: 16em;
-}
-
-fieldset {
+/* Toggle button */
+#controls-toggle {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 1000;
+  width: 44px;
+  height: 44px;
   border: none;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.2);
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
 }
 
-#rendering-options label,
-legend h3 {
-  height: 2em;
-  flex: 0 0 auto;
-  color: grey;
+#controls-toggle:hover {
+  background: rgba(255,255,255,0.35);
 }
 
-legend {
-  color: grey;
-  height: 2em;
-  flex: 0 0 auto;
-  font-size: large;
-  padding: 1em 0 0 0;
+/* Controls panel */
+#controls-panel {
+  position: fixed;
+  top: 70px;
+  right: 16px;
+  z-index: 999;
+  background: rgba(30,30,30,0.95);
+  border-radius: 12px;
+  padding: 16px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
 }
 
-#rendering-options checkbox {
-  height: 2em;
-  flex: 0 0 auto;
-  color: grey;
-
+#controls-panel.hidden {
+  display: none;
 }
 
-#canvas-controls {
-  display: grid;
-  grid-template-columns: 20vh 10vh;
-}
-
-#paletteCanvas {
-  width: 30vw;
-  height: calc(80vh - 16em);
-  background-color: orange;
-}
-
-#v-div-2 {
-  display: grid;
-  width: 24vw;
-  height: 26vh;
-  grid-template-rows: 24vw 2vw;
-}
-
+/* Buttons grid */
 #buttons {
-  width: 24vw;
   display: grid;
-  grid-template-columns: repeat(8, 2vw);
-  grid-template-rows: repeat(2, 2vw);
+  grid-template-columns: repeat(8, 24px);
+  gap: 2px;
 }
 
 #buttons .color,
 #buttons .action {
-  width: 2vw;
-  height: 2vw;
-
-  /* simulated bevel */
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
   box-shadow:
-    inset 1px 1px 0 rgba(255, 255, 255, 0.6),
-    /* top-left highlight */
-    inset -1px -1px 0 rgba(0, 0, 0, 0.3);
-  /* bottom-right shadow */
+    inset 1px 1px 0 rgba(255,255,255,0.3),
+    inset -1px -1px 0 rgba(0,0,0,0.3);
 }
 
-.color-1 {
-  background-color: #FF4C4C;
+#buttons .action svg {
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  display: block;
 }
 
-/* bright red */
-.color-2 {
-  background-color: #800000;
+#buttons .action-5 {
+  background: #666;
 }
 
-/* dark red */
-.color-3 {
-  background-color: #FF94C2;
+#color-picker {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 2px solid white;
+  border-radius: 4px;
+  cursor: pointer;
+  background: linear-gradient(135deg, red, yellow, green, cyan, blue, magenta, red);
 }
 
-/* pastel pink */
-.color-4 {
-  background-color: #FF944D;
+#color-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
 }
 
-/* bright orange */
-.color-5 {
-  background-color: #FFEB99;
+#color-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 2px;
 }
 
-/* pastel yellow */
-.color-6 {
-  background-color: #FFEB3B;
+#color-picker::-moz-color-swatch {
+  border: none;
+  border-radius: 2px;
 }
 
-/* bright yellow */
-.color-7 {
-  background-color: #AEEA00;
+/* Model selector */
+#v-div-1 {
+  margin-top: 16px;
 }
 
-/* bright lime */
-.color-8 {
-  background-color: #C8FACC;
+#model-select-container select {
+  width: 100%;
+  padding: 8px;
+  border-radius: 6px;
+  border: none;
+  background: #444;
+  color: white;
+  font-family: monospace;
 }
 
-/* pastel green */
-.color-9 {
-  background-color: #00C853;
+fieldset {
+  border: 1px solid #555;
+  border-radius: 8px;
+  margin-top: 12px;
+  padding: 12px;
 }
 
-/* bright green */
-.color-10 {
-  background-color: #006400;
+legend {
+  color: #aaa;
+  font-size: 14px;
+  padding: 0 8px;
 }
 
-/* dark green */
-.color-11 {
-  background-color: #B2EBF2;
+#rendering-options label {
+  color: #ccc;
+  font-size: 13px;
+  margin-left: 6px;
 }
 
-/* pastel cyan/blue */
-.color-12 {
-  background-color: #448AFF;
+#rendering-options > div {
+  margin: 8px 0;
 }
 
-/* bright blue */
-.color-13 {
-  background-color: #003399;
+#rendering-options input {
+  accent-color: #448AFF;
 }
 
-/* dark blue */
-.color-14 {
-  background-color: #7C4DFF;
-}
+/* Colors */
+.color-1 { background-color: #FF4C4C; }
+.color-2 { background-color: #800000; }
+.color-3 { background-color: #FF94C2; }
+.color-4 { background-color: #FF944D; }
+.color-5 { background-color: #FFEB99; }
+.color-6 { background-color: #FFEB3B; }
+.color-7 { background-color: #AEEA00; }
+.color-8 { background-color: #C8FACC; }
+.color-9 { background-color: #00C853; }
+.color-10 { background-color: #006400; }
+.color-11 { background-color: #B2EBF2; }
+.color-12 { background-color: #448AFF; }
+.color-13 { background-color: #003399; }
+.color-14 { background-color: #7C4DFF; }
+.color-15 { background-color: #F8BFFF; }
+.color-16 { background-color: #3C1A78; }
 
-/* bright violet */
-.color-15 {
-  background-color: #F8BFFF;
-}
+/* Mobile styles */
+@media (max-width: 480px) {
+  #controls-toggle {
+    top: 10px;
+    right: 10px;
+    width: 48px;
+    height: 48px;
+    font-size: 28px;
+  }
 
-/* pastel violet/pink */
-.color-16 {
-  background-color: #3C1A78;
-}
+  #controls-panel {
+    top: 68px;
+    right: 10px;
+    left: 10px;
+    padding: 12px;
+    max-height: calc(100vh - 88px);
+  }
 
-/* dark violet */
+  #buttons {
+    grid-template-columns: repeat(6, 44px);
+    gap: 4px;
+  }
+
+  #buttons .color,
+  #buttons .action {
+    width: 44px;
+    height: 44px;
+    border-radius: 6px;
+  }
+
+
+  #color-picker {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  #model-select-container select {
+    padding: 12px;
+    font-size: 16px;
+  }
+
+  #rendering-options label {
+    font-size: 16px;
+  }
+
+  #rendering-options input {
+    width: 20px;
+    height: 20px;
+  }
+
+  fieldset {
+    padding: 10px;
+  }
+}

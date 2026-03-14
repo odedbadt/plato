@@ -1,121 +1,79 @@
-import * as glMatrix from 'gl-matrix'
 import * as Glsl from './glsl'
 import * as webgl_utils from './webgl_utils'
-import { rect_union } from "@oded/tsutils/vec2";
 import type { Rect } from "@oded/tsutils/vec2";
 
-
-
+// WebglRenderer: Stateful bridge that caches shader programs and orchestrates draw calls
+// webgl_utils remains stateless - this class manages the GL state lifecycle
 export class WebglRenderer {
-  alpha: number = 0;
+  gl: WebGL2RenderingContext;
   texture_canvas: HTMLCanvasElement;
-  dirty_rectangle: Rect | null = null;
-  texture: WebGLTexture | null = null;
-  is_dirty: boolean = true;
-  main_gl: WebGL2RenderingContext;
-  model: webgl_utils.Model;
-  program: WebGLProgram | null = null;
-  overlay_transparency: any;
-  mirrors: boolean = false;
-  main_model_uniforms: webgl_utils.Uniforms = {};
+
+  // Cached shader programs - built once, reused every frame
   main_shader_program: WebGLProgram | null = null;
+  mirror_shader_program: WebGLProgram | null = null;
   overlay_shader_program: WebGLProgram | null = null;
-  overlay_uniforms: webgl_utils.Uniforms = {};
-  overlay_model: webgl_utils.Model = { vertices: [], texture: [] };
 
+  // Texture dirty tracking
+  texture_dirty: boolean = true;
 
-
-  constructor(texture_canvas: HTMLCanvasElement, model: webgl_utils.Model) {
+  constructor(main_canvas: HTMLCanvasElement, texture_canvas: HTMLCanvasElement) {
     this.texture_canvas = texture_canvas;
-    this.model = model;
-    this.main_gl = texture_canvas.getContext("webgl2")!;
-    if (!this.main_gl) {
+    const gl = main_canvas.getContext("webgl2");
+    if (!gl) {
       throw new Error("WebGL2 not supported");
     }
-    this.overlay_model =
-    {
-      "vertices": [
-        -1, -1, -1,
-        1, -1, -1,
-        -1, 1, -1,
-        1, 1, -1,
-        1, -1, -1,
-        -1, 1, -1],
-      "texture": [
-        0, 1,
-        1, 1,
-        0, 0,
-        1, 0,
-        1, 1,
-        0, 0]
+    this.gl = gl;
+
+    // Build and cache all shader programs once
+    this.main_shader_program = webgl_utils.build_program(gl, Glsl.VS_SOURCE, Glsl.FS_SOURCE);
+    this.mirror_shader_program = webgl_utils.build_program(gl, Glsl.VS_SOURCE, Glsl.FS_SOURCE_MIRRORS);
+    this.overlay_shader_program = webgl_utils.build_program(gl, Glsl.VS_SOURCE_OVERLAY, Glsl.FS_SOURCE_OVERLAY);
+  }
+
+  // Mark texture as needing refresh
+  mark_texture_dirty() {
+    this.texture_dirty = true;
+  }
+
+  // Refresh texture from canvas (only if dirty)
+  refresh_texture() {
+    if (this.texture_dirty) {
+      webgl_utils.create_texture_from_canvas(this.gl, this.texture_canvas);
+      this.texture_dirty = false;
     }
-    this.initialize();
-  }
-  initialize() {
-    //this.program = webgl_utils.
-    this.texture = webgl_utils.create_texture_from_canvas(this.main_gl!, this.texture_canvas);
-    //webgl_utils.bind_texture_to_program(main_gl, this.texture);
-    this.main_shader_program = webgl_utils.build_program(main_gl, Glsl.VS_SOURCE, Glsl.FS_SOURCE, true,
-      texture_canvas.width, texture_canvas.height);
-    this.main_model_uniforms = this.matrix_uniforms();
-    this.overlay_shader_program = webgl_utils.build_program(main_gl, Glsl.VS_SOURCE_OVERLAY, Glsl.FS_SOURCE_OVERLAY, false,
-
-      this.overlay_uniforms = {
-        "u_texture": {
-          type: 'uniform1i',
-          value: 0
-        }
-      }
-    this.mark_all_as_dirty();
   }
 
-
-  mark_as_dirty(rect: Rect) {
-    this.dirty_rectangle = rect_union(this.dirty_rectangle, rect);
-    this.is_dirty = true;
+  // Begin frame - setup GL state
+  begin_frame() {
+    webgl_utils.setup_render_state(this.gl);
   }
-  mark_all_as_dirty() {
-    this.dirty_rectangle = {
-      x: 0, y: 0, w: this.texture_canvas.width, h: this.texture_canvas.height
+
+  // End frame - cleanup GL state
+  end_frame() {
+    webgl_utils.unbind_data(this.gl);
+  }
+
+  // Draw model with cached main shader
+  draw_model(model: webgl_utils.Model, uniforms: webgl_utils.Uniforms) {
+    if (this.main_shader_program) {
+      webgl_utils.draw_webgl_model(this.gl, model, this.main_shader_program, uniforms);
     }
-    this.is_dirty = true;
   }
 
-  set_alpha(alpha: number) {
-    this.alpha = alpha;
-    this.is_dirty = true;
-    this.main_model_uniforms = this.matrix_uniforms();
+  // Draw mirrors with cached mirror shader
+  draw_mirrors(model: webgl_utils.Model, uniforms: webgl_utils.Uniforms) {
+    if (this.mirror_shader_program) {
+      webgl_utils.draw_webgl_model(this.gl, model, this.mirror_shader_program, uniforms);
+    }
   }
 
-  unbind_data() {
-    webgl_utils.unbind_data(this.main_gl);
+  // Draw overlay with cached overlay shader
+  draw_overlay(model: webgl_utils.Model, uniforms: webgl_utils.Uniforms) {
+    if (this.overlay_shader_program) {
+      // Disable depth test for overlay - it should always be on top
+      this.gl.disable(this.gl.DEPTH_TEST);
+      webgl_utils.draw_webgl_model(this.gl, model, this.overlay_shader_program, uniforms);
+      this.gl.enable(this.gl.DEPTH_TEST);
+    }
   }
-  draw_model() {
-    if (!this.is_dirty || !this.texture || !this.main_shader_program) {
-      return
-    }
-    this.is_dirty = false
-    if (this.dirty_rectangle) {
-      webgl_utils.update_texture_rect(this.main_gl, this.texture, this.texture_canvas, this.dirty_rectangle);
-      this.dirty_rectangle = null;
-    }
-
-
-    //webgl_utils.clear(main_gl)
-    if (!this.is_dirty || !this.texture || !this.overlay_shader_program) {
-      return
-    }
-    webgl_utils.draw_webgl_model(this.main_gl, this.model, this.main_shader_program, this.main_model_uniforms)
-    webgl_utils.draw_webgl_model(this.main_gl, this.overlay_model, this.overlay_shader_program,
-      this.overlay_uniforms)
-
-
-  };
-
-
-
-
 }
-
-
-

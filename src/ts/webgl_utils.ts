@@ -17,7 +17,7 @@ export type Model = {
 function isPowerOf2(value: number) {
     return (value & (value - 1)) === 0;
 }
-export matrix_uniforms(alpha: number): Uniforms {
+export function matrix_uniforms(alpha: number): Uniforms {
     const x_axis = new Float32Array([1, 0, 0]);
     const y_axis = new Float32Array([0, 1, 0]);
 
@@ -143,8 +143,6 @@ export function create_shader_program(gl: WebGLRenderingContext): WebGLProgram |
 }
 
 export function link_shaders(gl: WebGLRenderingContext, shaderProgram: WebGLProgram, vertexShader: WebGLShader, fragmentShader: WebGLShader): WebGLProgram {
-    gl.useProgram(shaderProgram);
-
     gl.attachShader(shaderProgram, vertexShader);
     gl.attachShader(shaderProgram, fragmentShader);
     gl.linkProgram(shaderProgram);
@@ -156,80 +154,71 @@ export function link_shaders(gl: WebGLRenderingContext, shaderProgram: WebGLProg
     }
     return shaderProgram;
 }
-export function build_program(gl: WebGLRenderingContext, fSource: string, vsSource: string): WebGLProgram | null {
-    // Vertex shader source code
+
+// Stateless: only creates and links shaders, no GL state changes
+export function build_program(gl: WebGLRenderingContext, vsSource: string, fsSource: string): WebGLProgram | null {
     const shaderProgram = create_shader_program(gl);
-    const vertexShader = compile_vertex_shader(gl, fSource);
-    const fragmentShader = compile_fragment_shader(gl, vsSource);
+    if (!shaderProgram) {
+        return null;
+    }
+    const vertexShader = compile_vertex_shader(gl, vsSource);
+    const fragmentShader = compile_fragment_shader(gl, fsSource);
     if (!vertexShader || !fragmentShader) {
         throw new Error("compilation failure: " + gl.getError());
     }
-    gl.disable(gl.CULL_FACE)
+    return link_shaders(gl, shaderProgram, vertexShader, fragmentShader);
+}
+
+// State setup - call before drawing
+export function setup_render_state(gl: WebGLRenderingContext) {
+    // Set viewport to canvas size
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+    // Clear framebuffer
+    gl.clearColor(0, 0, 0, 0);
+    gl.clearDepth(1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // Enable render state
+    gl.disable(gl.CULL_FACE);
     gl.enable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-
-    return link_shaders(gl, shaderProgram, vertexShader, fragmentShader);
-
-
 }
 export function bind_data_to_shaders(gl: WebGLRenderingContext, model: Model, shaderProgram: WebGLShader) {
-    if (!model.texture) {
-        return;
-    }
+    // Always bind vertices
     const vertexBuffer = create_vertex_buffer(gl, model.vertices);
-
-    const textureCoordBuffer = create_texture_buffer(gl, model.texture)
-
-    const vertexPosition = gl.getAttribLocation(
-        shaderProgram,
-        "aVertexPosition"
-    );
+    const vertexPosition = gl.getAttribLocation(shaderProgram, "aVertexPosition");
     gl.enableVertexAttribArray(vertexPosition);
-    // window.bound_locations = window.bound_locations || []
-    // window.bound_locations.push(vertexPosition)
     gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
     gl.vertexAttribPointer(vertexPosition, 3, gl.FLOAT, false, 0, 0);
+
+    // Bind colors if present
     if (model.colors) {
-        const colorBuffer = create_color_buffer(gl, model.colors)
-        const vertexColorPosition = gl.getAttribLocation(
-            shaderProgram, "aVertexColor");
-        //window.bound_locations.push(vertexColorPosition)
-
-        console.log(vertexPosition, vertexColorPosition, gl.getError());
-
+        const colorBuffer = create_color_buffer(gl, model.colors);
+        const vertexColorPosition = gl.getAttribLocation(shaderProgram, "aVertexColor");
         gl.enableVertexAttribArray(vertexColorPosition);
         gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
         gl.vertexAttribPointer(vertexColorPosition, 4, gl.FLOAT, false, 0, 0);
     }
+
+    // Bind normals if present
     if (model.normals) {
-        const normalBuffer = create_normal_buffer(gl, model.normals)
-        const normalPosition = gl.getAttribLocation(
-            shaderProgram,
-            "aNormalDirection"
-        );
-        //window.bound_locations.push(normalPosition)
+        const normalBuffer = create_normal_buffer(gl, model.normals);
+        const normalPosition = gl.getAttribLocation(shaderProgram, "aNormalDirection");
         gl.enableVertexAttribArray(normalPosition);
         gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
         gl.vertexAttribPointer(normalPosition, 3, gl.FLOAT, false, 0, 0);
     }
 
-
-    if (textureCoordBuffer) {
-        const textureCoordPosition = gl.getAttribLocation(
-            shaderProgram,
-            "aTextureCoord"
-        );
+    // Bind texture coords if present
+    if (model.texture) {
+        const textureCoordBuffer = create_texture_buffer(gl, model.texture);
+        const textureCoordPosition = gl.getAttribLocation(shaderProgram, "aTextureCoord");
         gl.enableVertexAttribArray(textureCoordPosition);
         gl.bindBuffer(gl.ARRAY_BUFFER, textureCoordBuffer);
         gl.vertexAttribPointer(textureCoordPosition, 2, gl.FLOAT, false, 0, 0);
     }
-    const vectorIndexPosition = gl.getAttribLocation(
-        shaderProgram,
-        "aVectorIndex"
-    );
-
 }
 
 
@@ -261,8 +250,9 @@ export function create_texture_from_canvas(gl: WebGLRenderingContext,
         texture_context.getImageData(0, 0, texture_canvas.width, texture_canvas.height)
         : new ImageData(new Uint8ClampedArray([255, 255, 255, 255]), 1, 1);
 
+    gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(cursorWordLeftSelect
+    gl.texImage2D(
         gl.TEXTURE_2D,
         0,
         gl.RGBA,
@@ -270,33 +260,46 @@ export function create_texture_from_canvas(gl: WebGLRenderingContext,
         gl.UNSIGNED_BYTE,
         imageData
     );
-    gl.bindTexture(gl.TEXTURE_2D, texture);
+
+    // Set texture parameters
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
     return texture;
 }
 
-export function draw_webgl_model(gl: WebGLRenderingContext, model: Model, shader_program: WebGLShader, uniforms: Uniforms = []) {
-
+// Stateless draw call - does not manage GL state, caller is responsible for setup/cleanup
+export function draw_webgl_model(gl: WebGLRenderingContext, model: Model, shader_program: WebGLShader, uniforms: Uniforms = {}) {
     if (model.vertices && model.normals && model.vertices.length != model.normals.length) {
         throw new Error(`Bad normal count, vertices: ${model.vertices.length} != normals: ${model.normals.length}`)
     }
 
+    gl.useProgram(shader_program);
+
+    // Set uniforms
     Object.entries(uniforms).forEach((entry) => {
         const name = entry[0]
         const type: string = entry[1].type as string
         const value = entry[1].value
         const uniform_location = gl.getUniformLocation(shader_program, name);
-        if (uniform_location != -1) {
+        if (uniform_location !== null) {
             const binding_function_name = type as keyof WebGLRenderingContext
-            const binding_function =
-                (gl[binding_function_name] as Function).bind(gl);
-            binding_function(uniform_location, false, value);
+            const binding_function = (gl[binding_function_name] as Function).bind(gl);
+            // Matrix uniforms need transpose parameter, scalar uniforms don't
+            if (type.includes('Matrix')) {
+                binding_function(uniform_location, false, value);
+            } else {
+                binding_function(uniform_location, value);
+            }
         }
     })
+
+    // Bind vertex data and draw
     bind_data_to_shaders(gl, model, shader_program);
-    gl.useProgram(shader_program);
-    gl.drawArrays(gl.TRIANGLES, 0, vertex_count || model.vertices.length / 3);
-    unbind_data(gl);
-};
+    gl.drawArrays(gl.TRIANGLES, 0, model.vertices.length / 3);
+}
 export function unbind_data(gl: WebGLRenderingContext) {
     gl.disable(gl.BLEND);
     gl.disable(gl.CULL_FACE);

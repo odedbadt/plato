@@ -74,8 +74,6 @@ void main(void) {
 export const FS_SOURCE_OVERLAY = `#version 300 es
 precision mediump float;
 in vec2 vTextureCoord;
-in float fBrightness;
-in float vectorIndex;
 
 out vec4 fragColor;
 uniform sampler2D uTexture;
@@ -83,6 +81,6 @@ uniform float uOpacity;
 
 void main(void) {
   vec4 sampled = texture(uTexture, vTextureCoord);
-  fragColor = vec4(sampled.rgb, sampled.a*(0.0 + uOpacity));
+  fragColor = vec4(sampled.rgb, sampled.a * uOpacity);
 }
 `
