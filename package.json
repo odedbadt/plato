@@ -11,7 +11,7 @@
     }
   },
   "dependencies": {
-    "@oded/tsutils": "workspace:*",
+    "@oded/tsutils": "*",
     "three": "^0.160.1"
   },
   "scripts": {

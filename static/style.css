@@ -54,10 +54,29 @@ html, body {
   background: rgba(255,255,255,0.35);
 }
 
+#spin-toggle {
+  position: fixed;
+  top: 70px;
+  right: 16px;
+  z-index: 1000;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.2);
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+#spin-toggle:hover {
+  background: rgba(255,255,255,0.35);
+}
+
 /* Controls panel */
 #controls-panel {
   position: fixed;
-  top: 70px;
+  top: 124px;
   right: 16px;
   z-index: 999;
   background: rgba(30,30,30,0.95);

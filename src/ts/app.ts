@@ -2,94 +2,11 @@ import * as Glsl from './glsl'
 import * as webgl_utils from './webgl_utils'
 import { WebglRenderer } from './webgl_renderer'
 import { OVERLAY_VERTICES, OVERLAY_TEXTURE_COORDS } from './geometry_data'
+import { parse_RGBA, hsl_to_rgb } from '@oded/tsutils/color';
+import { floodfill as _floodfill } from '@oded/tsutils/canvas';
 
 import { createApp, h } from 'vue';
 import * as glMatrix from 'gl-matrix'
-// shim added by migration
-const _equal_colors = (a: any, b: any) => JSON.stringify(a) === JSON.stringify(b);
-
-function hsl_to_rgb(hsl: [number, number, number]): [number, number, number] {
-  let r: number, g: number, b: number;
-  const h = hsl[0];
-  const s = hsl[1];
-  const l = hsl[2];
-  if (s === 0) {
-    r = g = b = l; // achromatic
-  } else {
-    const hue2rgb = (p: number, q: number, t: number): number => {
-      if (t < 0) t += 1;
-      if (t > 1) t -= 1;
-      if (t < 1 / 6) return p + (q - p) * 6 * t;
-      if (t < 1 / 2) return q;
-      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-      return p;
-    };
-
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    r = hue2rgb(p, q, h + 1 / 3);
-    g = hue2rgb(p, q, h);
-    b = hue2rgb(p, q, h - 1 / 3);
-  }
-
-  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-}
-function parse_RGBA(color: string | Uint8ClampedArray): Uint8ClampedArray {
-  if (color instanceof Uint8ClampedArray) {
-    return color
-  }
-  // Match the pattern for "rgb(r, g, b)"
-  let regex = /rgba\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)/;
-  // Execute the regex on the input string
-  let result = regex.exec(color);
-  if (result) {
-    // Return the extracted r, g, b values as an array of numbers
-    let r = parseInt(result[1]);
-    let g = parseInt(result[2]);
-    let b = parseInt(result[3]);
-    let a = parseInt(result[4]);
-    return Uint8ClampedArray.from([r, g, b, a]);
-  } else {
-    throw new Error("Invalid rgb string format");
-  }
-}
-// TODO: fix floodfill later
-function _floodfill(read_context: CanvasRenderingContext2D, write_context: CanvasRenderingContext2D,
-  replaced_color: Uint8ClampedArray, tool_color: Uint8ClampedArray,
-  x: number, y: number, w: number, h: number) {
-  const context_image_data = read_context.getImageData(0, 0, w, h)
-  const context_data = context_image_data.data;
-  let safety = w * h * 4;
-  let stack = [{ x: Math.floor(x), y: Math.floor(y) }]
-  while (stack.length > 0 && safety-- > 0) {
-    const dot = stack.pop();
-    if (!dot) {
-      break
-    }
-    const x = dot.x;
-    const y = dot.y;
-    if (x < 0 ||
-      y < 0 ||
-      x > w ||
-      y >= h) {
-      continue
-    }
-    const offset = (w * y + x) * 4;
-    const color_at_xy = context_data.slice(offset, offset + 4);
-    if (!_equal_colors(replaced_color, color_at_xy)) {
-      continue;
-    }
-    context_data[offset + 0] = tool_color[0];
-    context_data[offset + 1] = tool_color[1];
-    context_data[offset + 2] = tool_color[2];
-    context_data[offset + 3] = 255;
-    stack.push({ x: x + 1, y: y })
-    stack.push({ x: x - 1, y: y })
-    stack.push({ x: x, y: y - 1 })
-    stack.push({ x: x, y: y + 1 })
-  }
-  write_context.putImageData(context_image_data, 0, 0);
-}
 export class App {
   prefered_model_name: string;
   model: any;
@@ -156,11 +73,16 @@ export class App {
     }
 
     this.clear();
+    const spinBtn = document.getElementById('spin-toggle');
+    spinBtn?.addEventListener('click', () => {
+      this.is_spinning = !this.is_spinning;
+      if (spinBtn) spinBtn.textContent = this.is_spinning ? '⏸' : '▶';
+    });
     this.init_palette();
     this.init_texture_sketcher();
     this.init_overlay_opacity_throttle();
     this.init_actions();
-    const model_entries: {name: string}[] = [];
+    const model_entries: { name: string }[] = [];
     let prefered_model_name_there = false;
     this.load_model_names((model_names: string[]) => {
       this.model_names = model_names;
@@ -194,7 +116,7 @@ export class App {
               value: first_model, // Bind the value of the select box
               onInput: (event: Event) => (this as any).selectedModel = (event.target as HTMLSelectElement).value
             },
-            this.model_entries.map((model_entry: {name: string}) =>
+            this.model_entries.map((model_entry: { name: string }) =>
               h('option', {
                 id: 'model-option', // Unique ID for options (optional)
                 class: 'model-select',
@@ -209,7 +131,7 @@ export class App {
       app.mount('#model-select-container');
       const model_select_element = document.getElementById('model-select') as HTMLSelectElement;
       model_select_element?.addEventListener('change', () => {
-        this.load_and_set_model(model_select_element.value, () => {});
+        this.load_and_set_model(model_select_element.value, () => { });
       });
       this.load_and_set_model(first_model, () => {
 
@@ -222,34 +144,27 @@ export class App {
         }
         _this.is_dirty = true;
         _this.init_animation_loop();
-        _this.spinning_interval = setInterval(() => {
-          if (_this.is_spinning) {
-            _this.alpha = _this.alpha + _this.spinning_speed;
-            _this.is_dirty = true;
-          }
-        }, 100);
       });
-      const main_canvas = document.getElementById("mainCanvas");
-
-      // main_canvas.addEventListener("click", (event) => {
-      //   _this.is_spinning = !_this.is_spinning;
-      // })
 
 
     })
   }
   init_animation_loop() {
     const _this = this
-    const animate = () => {
-      if (this.model) {
+    let last_time: number | null = null;
+    const animate = (timestamp: number) => {
+      if (last_time !== null && _this.is_spinning) {
+        const dt = timestamp - last_time;
+        _this.alpha += _this.spinning_speed * (dt / 100);
+        _this.is_dirty = true;
+      }
+      last_time = timestamp;
+      if (_this.model) {
         _this.draw_model()
       }
-
-      //setTimeout(animate, 100)
       requestAnimationFrame(animate)
     }
     requestAnimationFrame(animate)
-    //setTimeout(animate, 100)
   }
   load_model(model_url: string, callback: (model: any) => void) {
     const cached = this.cache.getItem(model_url);
@@ -306,7 +221,7 @@ export class App {
     if (this.spinner_model) {
       this.set_model(this.spinner_model);
     }
-    this.set_spinning_speed(.035);
+    //this.set_spinning_speed(.035);
     const _this = this
     this.load_model(this.construct_url_for_name(model_name),
       (model: any) => {
