@@ -3,10 +3,12 @@
 ## Build
 
 ```bash
-npm run build   # tsc -b (composite, references ../tsutils)
+# From the monorepo root (../):
+npm run build   # TypeScript type-check (tsc -b)
+npm run bundle  # Webpack — must run this for changes to take effect in the browser
 ```
 
-No test or lint commands exist. Webpack is present as a dev dependency but `tsc` is the primary build tool.
+The HTML loads `../dist/plato/bundle.js`. Only `npm run bundle` updates it.
 
 ## Architecture
 

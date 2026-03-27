@@ -5,10 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm run build   # TypeScript compilation (tsc -b)
+# From the monorepo root (../):
+npm run build   # TypeScript type-checking (tsc -b)
+npm run bundle  # Webpack bundle — required for the app to pick up changes
 ```
 
-No test or lint commands are configured. Webpack is available as a dev dependency but the primary build tool is `tsc`.
+The HTML loads `../dist/plato/bundle.js` (webpack output). Running only `tsc -b` does **not** update the bundle.
 
 ## Architecture
 
