@@ -1,45 +1,40 @@
 name: Deploy to GitHub Pages
 
-permissions:
-  contents: write
 on:
   push:
-    branches:
-      - main  # Change 'main' to your default branch if necessary
+    branches: [main]
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
-      # Checkout the repository
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      # Set up Node.js
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
+      - name: Use Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 16  # Adjust as needed
+          node-version-file: .nvmrc
+          cache: npm
 
-      # Install dependencies and build the project
-      - name: Install dependencies and build
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript bundles
+        run: npm run build
+
+      - name: Stage files for deployment
         run: |
-          npm install
-          npm run build
-      - name: Create gh-pages branch if it doesn't exist
-        run: |
-          git branch -f gh-pages
-      - name: Deploy to GitHub Pages
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin
-          mv dist dist_tmp      
-          git checkout gh-pages
-          git reset --hard main
-          mv dist_tmp dist      
-          git add -f dist
-          git commit -m 'Deployment'
-          git push --force origin gh-pages
+          cp index.html dist/
+          [ -f CNAME ] && cp CNAME dist/ || true
+          cp -r static dist/
+
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: dist
+          publish_branch: gh-pages
   
