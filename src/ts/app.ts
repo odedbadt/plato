@@ -22,7 +22,6 @@ export class App {
   model: any;
   spinning_speed: number;
   rotation: glMatrix.quat;
-  drag_mode: 'rotate' | 'draw' = 'rotate';
   pen_color: string;
   pen_radius: number;
   dpr: number;
@@ -85,11 +84,6 @@ export class App {
     }
 
     this.clear();
-    const modeBtn = document.getElementById('mode-toggle');
-    modeBtn?.addEventListener('click', () => {
-      this.drag_mode = this.drag_mode === 'rotate' ? 'draw' : 'rotate';
-      if (modeBtn) modeBtn.textContent = this.drag_mode === 'rotate' ? '🔄' : '✏️';
-    });
     this.init_palette();
     this.init_texture_sketcher();
     this.init_overlay_opacity_throttle();
@@ -450,7 +444,7 @@ export class App {
     const _this = this;
 
     model_canvas.addEventListener("pointerdown", (event: PointerEvent) => {
-      if (this.drag_mode === 'rotate') {
+      if (event.ctrlKey) {
         model_canvas.setPointerCapture(event.pointerId);
         return;
       }
@@ -477,7 +471,7 @@ export class App {
       this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1])
     })
     model_canvas.addEventListener("pointerup", (event) => {
-      if (this.drag_mode === 'rotate') return;
+      if (event.ctrlKey) return;
       event.preventDefault();
       if (this.path && this.mirror_path) {
         texture_context.lineWidth = this.pen_radius;
@@ -493,7 +487,7 @@ export class App {
     })
     model_canvas.addEventListener("pointermove", (event) => {
       event.preventDefault();
-      if (event.buttons && this.drag_mode === 'rotate') {
+      if (event.buttons && event.ctrlKey) {
         const rect = model_canvas.getBoundingClientRect();
         const scale = 2.0 / Math.min(rect.width, rect.height);
         const cx = event.clientX - rect.left;
