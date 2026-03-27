@@ -443,11 +443,22 @@ export class App {
     }
     const _this = this;
 
+    // Prevent right-click context menu over the canvas at the document level
+    document.addEventListener("contextmenu", (event) => {
+      if (event.target === model_canvas) event.preventDefault();
+    });
+    model_canvas.addEventListener("mousedown", (event) => {
+      if (event.button === 2) event.preventDefault();
+    });
+
     model_canvas.addEventListener("pointerdown", (event: PointerEvent) => {
-      if (event.ctrlKey) {
+      if (event.button === 2) {
+        // Right button: rotate
+        event.preventDefault();
         model_canvas.setPointerCapture(event.pointerId);
         return;
       }
+      // Left button: sketch
       this.overlay_transparency = 0.9
       this.overlay_countdown = 500
       this.path = new Path2D();
@@ -471,7 +482,8 @@ export class App {
       this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1])
     })
     model_canvas.addEventListener("pointerup", (event) => {
-      if (event.ctrlKey) return;
+      if (event.button === 2) return;
+      // Left button: commit sketch stroke
       event.preventDefault();
       if (this.path && this.mirror_path) {
         texture_context.lineWidth = this.pen_radius;
@@ -487,7 +499,8 @@ export class App {
     })
     model_canvas.addEventListener("pointermove", (event) => {
       event.preventDefault();
-      if (event.buttons && event.ctrlKey) {
+      if (event.buttons & 2) {
+        // Right button held: rotate
         const rect = model_canvas.getBoundingClientRect();
         const scale = 2.0 / Math.min(rect.width, rect.height);
         const cx = event.clientX - rect.left;
@@ -513,7 +526,7 @@ export class App {
       }
       const coords = this.pointer_event_to_coordinates(event);
       const mirror_coords = mirror_coordinates(coords);
-      if (event.buttons) {
+      if (event.buttons & 1) {
         this.reset_opacity_to_opaque()
         if (!!(this.prev_coords && this.path && this.mirror_path)) {
           if (dist2(coords, this.prev_coords) * dpr * dpr > 10) {
