@@ -1,0 +1,29 @@
+:root {
+  --size: min(100vh, 100vw);
+}
+
+body {
+  background-color: black;
+  font-family: monospace;
+}
+
+html,
+body {
+  overscroll-behavior: contain;
+  /* reduces pull-to-refresh/bounce */
+}
+
+#mainCanvas {
+  width: var(--size);
+  height: var(--size);
+  touch-action: none;
+  cursor: crosshair;
+}
+
+#textureCanvas {
+  width: var(--size);
+  height: var(--size);
+  background-color: black;
+  visibility: none;
+  opacity: 0;
+}
