@@ -11,11 +11,14 @@
     }
   },
   "dependencies": {
-    "@oded/tsutils": "*",
+    "@oded/tsutils": "file:./tsutils",
     "gl-matrix": "^3.4.4",
     "three": "^0.160.1"
   },
   "scripts": {
     "build": "tsc -b"
+  },
+  "devDependencies": {
+    "@types/three": "^0.183.1"
   }
 }
