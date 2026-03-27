@@ -5,13 +5,24 @@ import { OVERLAY_VERTICES, OVERLAY_TEXTURE_COORDS } from './geometry_data'
 import { parse_RGBA, hsl_to_rgb } from '@oded/tsutils/color';
 import { floodfill as _floodfill } from '@oded/tsutils/canvas';
 
-import { createApp, h } from 'vue';
 import * as glMatrix from 'gl-matrix'
+
+// Maps a 2D point in [-1,1] onto the surface of a unit hemisphere (arcball projection)
+function project_to_sphere(x: number, y: number): glMatrix.vec3 {
+  const r2 = x * x + y * y;
+  if (r2 <= 1.0) {
+    return glMatrix.vec3.fromValues(x, y, Math.sqrt(1.0 - r2));
+  }
+  const r = Math.sqrt(r2);
+  return glMatrix.vec3.fromValues(x / r, y / r, 0);
+}
+
 export class App {
   prefered_model_name: string;
   model: any;
   spinning_speed: number;
-  alpha: number;
+  rotation: glMatrix.quat;
+  drag_mode: 'rotate' | 'draw' = 'rotate';
   pen_color: string;
   pen_radius: number;
   dpr: number;
@@ -36,12 +47,13 @@ export class App {
     this.prefered_model_name = prefered_model_name;
     this.model = null;
     this.spinning_speed = 0;
-    this.alpha = 0;
+    this.rotation = glMatrix.quat.create();
+    glMatrix.quat.rotateX(this.rotation, this.rotation, Math.PI / 3);
     this.pen_color = pen_color || 'green';
     this.pen_radius = pen_radius || 5;
     this.dpr = window.devicePixelRatio;
-    this.set_spinning_speed(.035);
-    this.is_spinning = true;
+    this.spinning_speed = 0;
+    this.is_spinning = false;
     this.cache = localStorage;
   }
   construct_url_for_name(model_name: string): string {
@@ -73,22 +85,20 @@ export class App {
     }
 
     this.clear();
-    const spinBtn = document.getElementById('spin-toggle');
-    spinBtn?.addEventListener('click', () => {
-      this.is_spinning = !this.is_spinning;
-      if (spinBtn) spinBtn.textContent = this.is_spinning ? '⏸' : '▶';
+    const modeBtn = document.getElementById('mode-toggle');
+    modeBtn?.addEventListener('click', () => {
+      this.drag_mode = this.drag_mode === 'rotate' ? 'draw' : 'rotate';
+      if (modeBtn) modeBtn.textContent = this.drag_mode === 'rotate' ? '🔄' : '✏️';
     });
     this.init_palette();
     this.init_texture_sketcher();
     this.init_overlay_opacity_throttle();
     this.init_actions();
-    const model_entries: { name: string }[] = [];
     let prefered_model_name_there = false;
     this.load_model_names((model_names: string[]) => {
       this.model_names = model_names;
       this.cache.setItem('all_model_names', JSON.stringify(model_names));
       for (const model_name of model_names) {
-        model_entries.push({ name: model_name });
         if (model_name == this.prefered_model_name) {
           prefered_model_name_there = true
         }
@@ -101,36 +111,19 @@ export class App {
       _this.warmup_cache(model_names);
       _this.load_spinner_model();
 
-      // Create the Vue app
-      const app = createApp({
-        data() {
-          return {
-            model_entries
-          };
-        },
-        render() {
-          return h('select',
-            {
-              name: 'Models',
-              id: 'model-select',
-              value: first_model, // Bind the value of the select box
-              onInput: (event: Event) => (this as any).selectedModel = (event.target as HTMLSelectElement).value
-            },
-            this.model_entries.map((model_entry: { name: string }) =>
-              h('option', {
-                id: 'model-option', // Unique ID for options (optional)
-                class: 'model-select',
-                key: model_entry.name,
-                value: model_entry.name
-              }, model_entry.name)
-            )
-          );
-        }
-
-      });
-      app.mount('#model-select-container');
-      const model_select_element = document.getElementById('model-select') as HTMLSelectElement;
-      model_select_element?.addEventListener('change', () => {
+      const container = document.getElementById('model-select-container');
+      const model_select_element = document.createElement('select');
+      model_select_element.id = 'model-select';
+      model_select_element.name = 'Models';
+      for (const model_name of model_names) {
+        const option = document.createElement('option');
+        option.value = model_name;
+        option.textContent = model_name;
+        model_select_element.appendChild(option);
+      }
+      container?.appendChild(model_select_element);
+      model_select_element.value = first_model;
+      model_select_element.addEventListener('change', () => {
         this.load_and_set_model(model_select_element.value, () => { });
       });
       this.load_and_set_model(first_model, () => {
@@ -150,15 +143,8 @@ export class App {
     })
   }
   init_animation_loop() {
-    const _this = this
-    let last_time: number | null = null;
-    const animate = (timestamp: number) => {
-      if (last_time !== null && _this.is_spinning) {
-        const dt = timestamp - last_time;
-        _this.alpha += _this.spinning_speed * (dt / 100);
-        _this.is_dirty = true;
-      }
-      last_time = timestamp;
+    const _this = this;
+    const animate = () => {
       if (_this.model) {
         _this.draw_model()
       }
@@ -464,6 +450,10 @@ export class App {
     const _this = this;
 
     model_canvas.addEventListener("pointerdown", (event: PointerEvent) => {
+      if (this.drag_mode === 'rotate') {
+        model_canvas.setPointerCapture(event.pointerId);
+        return;
+      }
       this.overlay_transparency = 0.9
       this.overlay_countdown = 500
       this.path = new Path2D();
@@ -487,6 +477,7 @@ export class App {
       this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1])
     })
     model_canvas.addEventListener("pointerup", (event) => {
+      if (this.drag_mode === 'rotate') return;
       event.preventDefault();
       if (this.path && this.mirror_path) {
         texture_context.lineWidth = this.pen_radius;
@@ -502,6 +493,30 @@ export class App {
     })
     model_canvas.addEventListener("pointermove", (event) => {
       event.preventDefault();
+      if (event.buttons && this.drag_mode === 'rotate') {
+        const rect = model_canvas.getBoundingClientRect();
+        const scale = 2.0 / Math.min(rect.width, rect.height);
+        const cx = event.clientX - rect.left;
+        const cy = event.clientY - rect.top;
+        const v_from = project_to_sphere(
+          (cx - event.movementX - rect.width / 2) * scale,
+          -(cy - event.movementY - rect.height / 2) * scale
+        );
+        const v_to = project_to_sphere(
+          (cx - rect.width / 2) * scale,
+          -(cy - rect.height / 2) * scale
+        );
+        const axis = glMatrix.vec3.cross(glMatrix.vec3.create(), v_from, v_to);
+        const angle = Math.acos(Math.min(1.0, glMatrix.vec3.dot(v_from, v_to)));
+        if (glMatrix.vec3.length(axis) > 1e-6) {
+          glMatrix.vec3.normalize(axis, axis);
+          const delta = glMatrix.quat.setAxisAngle(glMatrix.quat.create(), axis, angle);
+          glMatrix.quat.multiply(this.rotation, delta, this.rotation);
+          glMatrix.quat.normalize(this.rotation, this.rotation);
+          this.is_dirty = true;
+        }
+        return;
+      }
       const coords = this.pointer_event_to_coordinates(event);
       const mirror_coords = mirror_coordinates(coords);
       if (event.buttons) {
@@ -551,7 +566,7 @@ export class App {
     this.renderer.refresh_texture();
 
     // Compute uniforms
-    const uniforms = webgl_utils.matrix_uniforms(this.alpha);
+    const uniforms = webgl_utils.matrix_uniforms(this.rotation);
 
     // Begin frame
     this.renderer.begin_frame();
@@ -584,19 +599,10 @@ export class App {
     this.renderer.end_frame();
   }
   spin_and_draw() {
-    if (typeof (this.spinning_speed) === 'number') {
-      this.alpha = this.alpha + this.spinning_speed;
-    }
     if (this.is_spinning && this.spinning_speed > 0) {
       this.is_dirty = true;
     }
   }
 }
 
-
-localStorage.clear()
-window.addEventListener('load', () => {
-  const app = new App('stellated_dodecahedron')
-  app.init();
-});
 

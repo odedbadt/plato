@@ -15,13 +15,9 @@ export type Model = {
     texture?: Array<number>
 }
 
-export function matrix_uniforms(alpha: number): Uniforms {
-    const x_axis = new Float32Array([1, 0, 0]);
-    const y_axis = new Float32Array([0, 1, 0]);
-
+export function matrix_uniforms(rotation: glMatrix.quat): Uniforms {
     const rotation_matrix_4x4 = glMatrix.mat4.create();
-    glMatrix.mat4.rotate(rotation_matrix_4x4, rotation_matrix_4x4, alpha, y_axis);
-    glMatrix.mat4.rotate(rotation_matrix_4x4, rotation_matrix_4x4, Math.PI / 3, x_axis);
+    glMatrix.mat4.fromQuat(rotation_matrix_4x4, rotation);
 
     const viewMatrix = glMatrix.mat4.create();
     glMatrix.mat4.lookAt(viewMatrix, [0, -.1, 5], [0, -.1, 0], [0, 1, 0]);

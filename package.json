@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@oded/tsutils": "*",
+    "gl-matrix": "^3.4.4",
     "three": "^0.160.1"
   },
   "scripts": {
