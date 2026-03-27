@@ -27,15 +27,17 @@ jobs:
 
       - name: Stage files for deployment
         run: |
-          cp index.html dist/
-          [ -f CNAME ] && cp CNAME dist/ || true
-          cp -r static dist/
-          cp -r css dist/
+          mkdir -p deploy
+          cp index.html deploy/
+          cp bundle.js deploy/
+          [ -f CNAME ] && cp CNAME deploy/ || true
+          cp -r static deploy/
+          cp -r css deploy/
 
       - name: Publish to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: dist
+          publish_dir: deploy
           publish_branch: gh-pages
   
