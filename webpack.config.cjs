@@ -6,24 +6,13 @@ module.exports = {
   mode: "development",
   context: __dirname,
 
-  entry: {
-    plato: "./plato/src/ts/index.ts",
-    scrib: "./scrib/src/ts/index.ts",
-  },
+  entry: "./src/ts/index.ts",
 
   output: {
     path: path.resolve(__dirname, "dist"),
-    filename: "[name]/bundle.js",
-    clean: true,
-    // nicer original paths under "webpack:///"
-    devtoolModuleFilenameTemplate: info =>
-      "webpack:///" +
-      path
-        .relative(__dirname, info.absoluteResourcePath)
-        .replace(/\\/g, "/"),
+    filename: "bundle.js",
   },
 
-  // generate external *.map files (dist/plato/bundle.js.map, dist/scrib/bundle.js.map)
   devtool: "source-map",
 
   resolve: {
@@ -36,10 +25,7 @@ module.exports = {
         test: /\.tsx?$/,
         use: {
           loader: "ts-loader",
-          options: {
-            // let ts-loader use your tsconfig; it will turn sourceMap on when devtool is set
-            transpileOnly: false, // better stack traces while you debug; flip to true if you want speed
-          },
+          options: { transpileOnly: true },
         },
         exclude: /node_modules/,
       },
@@ -47,8 +33,8 @@ module.exports = {
   },
 
   optimization: {
-    minimize: false,           // no minification: easier to read stacks
-    concatenateModules: false, // avoid scope hoisting weirdness while debugging
+    minimize: false,
+    concatenateModules: false,
     usedExports: false,
     moduleIds: "named",
     chunkIds: "named",

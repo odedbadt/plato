@@ -15,9 +15,6 @@
     "tsBuildInfoFile": "./.tsbuildinfo",
   },
   "references": [
-    {
-      "path": "./tsutils"
-    }
   ],
   "include": [
     "src/ts"

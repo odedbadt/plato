@@ -23,13 +23,14 @@ jobs:
         run: npm ci
 
       - name: Build TypeScript bundles
-        run: npm run build
+        run: npm run bundle
 
       - name: Stage files for deployment
         run: |
           cp index.html dist/
           [ -f CNAME ] && cp CNAME dist/ || true
           cp -r static dist/
+          cp -r css dist/
 
       - name: Publish to gh-pages
         uses: peaceiris/actions-gh-pages@v4

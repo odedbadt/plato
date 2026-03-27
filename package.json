@@ -11,14 +11,18 @@
     }
   },
   "dependencies": {
-    "@oded/tsutils": "file:./tsutils",
     "gl-matrix": "^3.4.4",
     "three": "^0.160.1"
   },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "bundle": "webpack"
   },
   "devDependencies": {
-    "@types/three": "^0.183.1"
+    "@types/three": "^0.183.1",
+    "typescript": "^5.6.0",
+    "webpack": "^5.95.0",
+    "webpack-cli": "^5.1.4",
+    "ts-loader": "^9.5.1"
   }
 }
