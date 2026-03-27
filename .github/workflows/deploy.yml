@@ -32,7 +32,7 @@ jobs:
           cp bundle.js deploy/
           [ -f CNAME ] && cp CNAME deploy/ || true
           cp -r static deploy/
-          cp -r css deploy/
+          [ -d css ] && cp -r css deploy/ || true
 
       - name: Publish to gh-pages
         uses: peaceiris/actions-gh-pages@v4
