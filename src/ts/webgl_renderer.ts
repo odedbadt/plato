@@ -18,6 +18,12 @@ export class WebglRenderer {
   scene: THREE.Scene;
   camera: THREE.Camera;
 
+  // Geometry caches — avoid re-creating Float32Arrays + GPU uploads every frame
+  private cached_model: Model | null = null;
+  private cached_model_geo: THREE.BufferGeometry | null = null;
+  private cached_mirrors_verts: Array<number> | null = null;
+  private cached_mirrors_geo: THREE.BufferGeometry | null = null;
+
   constructor(main_canvas: HTMLCanvasElement, texture_canvas: HTMLCanvasElement) {
     this.texture_canvas = texture_canvas;
     this.renderer = new THREE.WebGLRenderer({ canvas: main_canvas, alpha: true });
@@ -99,13 +105,13 @@ export class WebglRenderer {
     // Three.js manages GL state cleanup internally
   }
 
-  private render_pass(geometry: THREE.BufferGeometry, material: THREE.RawShaderMaterial) {
+  private render_pass(geometry: THREE.BufferGeometry, material: THREE.RawShaderMaterial, owned: boolean = true) {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.frustumCulled = false;
     this.scene.clear();
     this.scene.add(mesh);
     this.renderer.render(this.scene, this.camera);
-    geometry.dispose();
+    if (owned) geometry.dispose();
   }
 
   private apply_uniforms(material: THREE.RawShaderMaterial, uniforms: Uniforms) {
@@ -118,12 +124,22 @@ export class WebglRenderer {
 
   draw_model(model: Model, uniforms: Uniforms) {
     this.apply_uniforms(this.main_material, uniforms);
-    this.render_pass(model_to_geometry(model), this.main_material);
+    if (this.cached_model !== model) {
+      this.cached_model_geo?.dispose();
+      this.cached_model_geo = model_to_geometry(model);
+      this.cached_model = model;
+    }
+    this.render_pass(this.cached_model_geo!, this.main_material, false);
   }
 
   draw_mirrors(model: Model, uniforms: Uniforms) {
     this.apply_uniforms(this.mirror_material, uniforms);
-    this.render_pass(model_to_geometry(model), this.mirror_material);
+    if (this.cached_mirrors_verts !== model.vertices) {
+      this.cached_mirrors_geo?.dispose();
+      this.cached_mirrors_geo = model_to_geometry(model);
+      this.cached_mirrors_verts = model.vertices;
+    }
+    this.render_pass(this.cached_mirrors_geo!, this.mirror_material, false);
   }
 
   draw_overlay(model: Model, uniforms: Uniforms) {

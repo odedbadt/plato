@@ -97,6 +97,9 @@ export class App {
   prev_mirror_coords: number[] | null = null;
   texture_canvas: HTMLCanvasElement | null = null;
   renderer: WebglRenderer | null = null;
+  // Multi-touch state
+  active_pointers: Map<number, { x: number, y: number }> = new Map();
+  rotating: boolean = false;
 
   constructor(prefered_model_name: string, spinning_speed = 0, pen_color: string | null = null, pen_radius: number | null = null) {
     this.prefered_model_name = prefered_model_name;
@@ -486,7 +489,6 @@ export class App {
       const mn = [v1[0] - v2[0], v1[1] - v2[1]];
       return mn[0] * mn[0] + mn[1] * mn[1];
     }
-    const _this = this;
 
     // Prevent right-click context menu over the canvas at the document level
     document.addEventListener("contextmenu", (event) => {
@@ -496,46 +498,25 @@ export class App {
       if (event.button === 2) event.preventDefault();
     });
 
-    model_canvas.addEventListener("pointerdown", (event: PointerEvent) => {
-      if (event.button === 2) {
-        // Right button: rotate
-        event.preventDefault();
-        model_canvas.setPointerCapture(event.pointerId);
-        return;
-      }
-      const coords = pointer_event_to_coordinates(event);
-      if (!coords) return;
-      // Fill tool: flood-fill at the texture position under the pointer
-      if (this.active_tool === 'fill') {
-        const tw = texture_canvas.width;
-        const th = texture_canvas.height;
-        const replaced_color = texture_context.getImageData(coords[0], coords[1], 1, 1).data;
-        const parsed_fore_color = parse_RGBA(this.pen_color);
-        _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, coords[0], coords[1], tw, th);
-        // Mirror: fill the reflected point too, matching how strokes are mirrored
-        const mx = tw - 1 - coords[1];
-        const my = th - 1 - coords[0];
-        _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, mx, my, tw, th);
-        this.renderer?.mark_texture_dirty();
+    const arcball_rotate = (from_x: number, from_y: number, to_x: number, to_y: number,
+      rect: DOMRect) => {
+      const scale = 2.0 / Math.min(rect.width, rect.height);
+      const v_from = project_to_sphere(
+        (from_x - rect.width / 2) * scale, -(from_y - rect.height / 2) * scale);
+      const v_to = project_to_sphere(
+        (to_x - rect.width / 2) * scale, -(to_y - rect.height / 2) * scale);
+      const axis = glMatrix.vec3.cross(glMatrix.vec3.create(), v_from, v_to);
+      const angle = Math.acos(Math.min(1.0, glMatrix.vec3.dot(v_from, v_to)));
+      if (glMatrix.vec3.length(axis) > 1e-6) {
+        glMatrix.vec3.normalize(axis, axis);
+        const delta = glMatrix.quat.setAxisAngle(glMatrix.quat.create(), axis, angle);
+        glMatrix.quat.multiply(this.rotation, delta, this.rotation);
+        glMatrix.quat.normalize(this.rotation, this.rotation);
         this.is_dirty = true;
-        return;
       }
-      // Left button: start sketch stroke
-      this.path = new Path2D();
-      this.mirror_path = new Path2D();
-      texture_context.strokeStyle = 'black'
-      texture_context.fillStyle = this.pen_color;
-      texture_context.lineWidth = 1;
-      this.prev_coords = [coords[0], coords[1]]
-      const mirror_coords = mirror_coordinates(coords);
+    };
 
-      this.path.moveTo(coords[0], coords[1])
-      this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1])
-    })
-    model_canvas.addEventListener("pointerup", (event) => {
-      if (event.button === 2) return;
-      // Left button: commit sketch stroke
-      event.preventDefault();
+    const commit_stroke = () => {
       if (this.path && this.mirror_path) {
         texture_context.lineWidth = this.pen_radius;
         texture_context.beginPath();
@@ -547,49 +528,117 @@ export class App {
         this.renderer?.mark_texture_dirty();
       }
       this.prev_coords = null;
-    })
-    model_canvas.addEventListener("pointermove", (event) => {
-      event.preventDefault();
-      if (event.buttons & 2) {
-        // Right button held: rotate
-        const rect = model_canvas.getBoundingClientRect();
-        const scale = 2.0 / Math.min(rect.width, rect.height);
-        const cx = event.clientX - rect.left;
-        const cy = event.clientY - rect.top;
-        const v_from = project_to_sphere(
-          (cx - event.movementX - rect.width / 2) * scale,
-          -(cy - event.movementY - rect.height / 2) * scale
-        );
-        const v_to = project_to_sphere(
-          (cx - rect.width / 2) * scale,
-          -(cy - rect.height / 2) * scale
-        );
-        const axis = glMatrix.vec3.cross(glMatrix.vec3.create(), v_from, v_to);
-        const angle = Math.acos(Math.min(1.0, glMatrix.vec3.dot(v_from, v_to)));
-        if (glMatrix.vec3.length(axis) > 1e-6) {
-          glMatrix.vec3.normalize(axis, axis);
-          const delta = glMatrix.quat.setAxisAngle(glMatrix.quat.create(), axis, angle);
-          glMatrix.quat.multiply(this.rotation, delta, this.rotation);
-          glMatrix.quat.normalize(this.rotation, this.rotation);
-          this.is_dirty = true;
-        }
+    };
+
+    model_canvas.addEventListener("pointerdown", (event: PointerEvent) => {
+      model_canvas.setPointerCapture(event.pointerId);
+      this.active_pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+      // Desktop right-click: rotation handled in pointermove
+      if (event.button === 2) { event.preventDefault(); return; }
+
+      // Second finger arriving: switch to rotation, cancel any active stroke
+      if (this.active_pointers.size >= 2) {
+        this.rotating = true;
+        this.path = null;
+        this.mirror_path = null;
+        this.prev_coords = null;
         return;
       }
+
+      // Coming out of a rotation gesture: wait for a fresh single-touch
+      if (this.rotating) return;
+
+      const coords = pointer_event_to_coordinates(event);
+      if (!coords) return;
+
+      if (this.active_tool === 'fill') {
+        const tw = texture_canvas.width;
+        const th = texture_canvas.height;
+        const replaced_color = texture_context.getImageData(coords[0], coords[1], 1, 1).data;
+        const parsed_fore_color = parse_RGBA(this.pen_color);
+        _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, coords[0], coords[1], tw, th);
+        const mx = tw - 1 - coords[1];
+        const my = th - 1 - coords[0];
+        _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, mx, my, tw, th);
+        this.renderer?.mark_texture_dirty();
+        this.is_dirty = true;
+        return;
+      }
+
+      this.path = new Path2D();
+      this.mirror_path = new Path2D();
+      texture_context.strokeStyle = 'black';
+      texture_context.fillStyle = this.pen_color;
+      texture_context.lineWidth = 1;
+      this.prev_coords = [coords[0], coords[1]];
+      const mirror_coords = mirror_coordinates(coords);
+      this.path.moveTo(coords[0], coords[1]);
+      this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1]);
+    });
+
+    const on_pointer_end = (event: PointerEvent) => {
+      this.active_pointers.delete(event.pointerId);
+      if (this.active_pointers.size === 0) this.rotating = false;
+      if (event.button === 2) return;
+      commit_stroke();
+    };
+    model_canvas.addEventListener("pointerup", on_pointer_end);
+    // pointercancel fires on iOS when the system interrupts (e.g. notification)
+    model_canvas.addEventListener("pointercancel", (event: PointerEvent) => {
+      this.active_pointers.delete(event.pointerId);
+      if (this.active_pointers.size === 0) this.rotating = false;
+      commit_stroke();
+    });
+
+    model_canvas.addEventListener("pointermove", (event) => {
+      event.preventDefault();
+
+      // Two-finger rotation (multi-touch)
+      if (this.active_pointers.size >= 2 && this.active_pointers.has(event.pointerId)) {
+        const rect = model_canvas.getBoundingClientRect();
+        let sx = 0, sy = 0;
+        for (const pt of this.active_pointers.values()) { sx += pt.x; sy += pt.y; }
+        const n = this.active_pointers.size;
+        const bx = sx / n - rect.left, by = sy / n - rect.top;
+        this.active_pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        sx = 0; sy = 0;
+        for (const pt of this.active_pointers.values()) { sx += pt.x; sy += pt.y; }
+        const ax = sx / n - rect.left, ay = sy / n - rect.top;
+        arcball_rotate(bx, by, ax, ay, rect);
+        return;
+      }
+
+      // Update stored position for single pointer
+      if (this.active_pointers.has(event.pointerId)) {
+        this.active_pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      }
+
+      // Desktop right-click rotation (single pointer)
+      if (event.buttons & 2) {
+        const rect = model_canvas.getBoundingClientRect();
+        const cx = event.clientX - rect.left;
+        const cy = event.clientY - rect.top;
+        arcball_rotate(cx - event.movementX, cy - event.movementY, cx, cy, rect);
+        return;
+      }
+
+      // Block drawing if we're still coming out of a rotation gesture
+      if (this.rotating) return;
       if (!(event.buttons & 1)) return;
 
       const coords = pointer_event_to_coordinates(event);
       if (!coords) return;
       const mirror_coords = mirror_coordinates(coords);
 
-      this.reset_opacity_to_opaque()
       if (this.prev_coords && this.path && this.mirror_path) {
         if (dist2(coords, this.prev_coords) > 4) {
           this.path.lineTo(coords[0], coords[1]);
           this.mirror_path.lineTo(mirror_coords[0], mirror_coords[1]);
           texture_context.strokeStyle = this.pen_color;
           texture_context.lineWidth = this.pen_radius * 2;
-          texture_context.stroke(this.path)
-          texture_context.stroke(this.mirror_path)
+          texture_context.stroke(this.path);
+          texture_context.stroke(this.mirror_path);
         } else {
           this.path.moveTo(coords[0], coords[1]);
           this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1]);
@@ -600,15 +649,15 @@ export class App {
 
       texture_context.fillStyle = this.pen_color;
       texture_context.beginPath();
-      texture_context.ellipse(coords[0], coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2)
+      texture_context.ellipse(coords[0], coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2);
       texture_context.fill();
       texture_context.lineWidth = 0;
       texture_context.beginPath();
-      texture_context.ellipse(mirror_coords[0], mirror_coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2)
+      texture_context.ellipse(mirror_coords[0], mirror_coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2);
       texture_context.fill();
       this.is_dirty = true;
       this.renderer?.mark_texture_dirty();
-    })
+    });
 
   }
   draw_model() {
