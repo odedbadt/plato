@@ -33,8 +33,17 @@ function _floodfill(
   const [tr, tg, tb, ta] = replaced_color;
   const [nr, ng, nb, na] = new_color;
   if (tr === nr && tg === ng && tb === nb && ta === na) return;
-  const stack: number[] = [Math.round(y) * w + Math.round(x)];
   const visited = new Uint8Array(w * h);
+  const stack: number[] = [];
+
+  const enqueue = (px: number, py: number) => {
+    if (px < 0 || py < 0 || px >= w || py >= h) return;
+    const idx = py * w + px;
+    if (!visited[idx]) stack.push(idx);
+  };
+
+  enqueue(Math.round(x), Math.round(y));
+
   while (stack.length > 0) {
     const idx = stack.pop()!;
     if (visited[idx]) continue;
@@ -45,11 +54,13 @@ function _floodfill(
     data[pixel_offset] = nr; data[pixel_offset + 1] = ng;
     data[pixel_offset + 2] = nb; data[pixel_offset + 3] = na;
     const px = idx % w, py = Math.floor(idx / w);
-    if (px > 0) stack.push(idx - 1);
-    if (px < w - 1) stack.push(idx + 1);
-    if (py > 0) stack.push(idx - w);
-    if (py < h - 1) stack.push(idx + w);
+
+    enqueue(px - 1, py);
+    enqueue(px + 1, py);
+    enqueue(px, py - 1);
+    enqueue(px, py + 1);
   }
+
   write_ctx.putImageData(image_data, 0, 0);
 }
 
@@ -85,7 +96,7 @@ export class App {
   overlay_transparency: number = 0.9;
   overlay_transparency_decay_factor: number = 0.6;
   overlay_countdown: number = 50;
-  prev_coords: number[] | null = null;
+  active_tool: 'sketch' | 'fill' = 'sketch';
   prev_mirror_coords: number[] | null = null;
   texture_canvas: HTMLCanvasElement | null = null;
   renderer: WebglRenderer | null = null;
@@ -381,17 +392,13 @@ export class App {
     }
     // TODO: fix floodfill later
     const floodfill_div = document.getElementById('floodfill')
-    floodfill_div?.addEventListener('click', (event) => {
-      const texture_canvas_element = document.getElementById('textureCanvas') as HTMLCanvasElement;
-      if (!texture_canvas_element) return;
-      const texture_canvas_context = texture_canvas_element.getContext('2d', { 'willReadFrequently': true });
-      if (!texture_canvas_context) return;
-      const coords = this.pointer_event_to_coordinates(event as PointerEvent);
-      const w = texture_canvas_element.width;
-      const h = texture_canvas_element.height;
-      const replaced_color = texture_canvas_context.getImageData(coords[0], coords[1], 1, 1).data;
-      const parsed_fore_color = parse_RGBA(this.pen_color);
-      _floodfill(texture_canvas_context, texture_canvas_context, replaced_color, parsed_fore_color, coords[0], coords[1], w, h);
+    floodfill_div?.addEventListener('click', () => {
+      this.active_tool = this.active_tool === 'fill' ? 'sketch' : 'fill';
+      const is_fill = this.active_tool === 'fill';
+      floodfill_div.classList.toggle('active', is_fill);
+      const model_canvas = document.getElementById('mainCanvas') as HTMLCanvasElement;
+      if (model_canvas) model_canvas.style.cursor = is_fill ? 'cell' : 'crosshair';
+      this.is_dirty = true;
     })
   }
   // const pen_size = pen_size_div).backgroundpen_size;
@@ -456,8 +463,7 @@ export class App {
     if (!texture_canvas) return;
     const texture_context = texture_canvas.getContext('2d', { willReadFrequently: true });
     if (!texture_context) return;
-    texture_context.clearRect(0, 0,
-      texture_canvas.width, texture_canvas.height);
+    texture_context.clearRect(0, 0, texture_canvas.width, texture_canvas.height);
     this.is_dirty = true;
     this.renderer?.mark_texture_dirty();
   }
@@ -506,6 +512,22 @@ export class App {
         model_canvas.setPointerCapture(event.pointerId);
         return;
       }
+      const coords = this.pointer_event_to_coordinates(event);
+      // Fill tool: flood-fill at the clicked canvas position
+      if (this.active_tool === 'fill') {
+        const w = texture_canvas.width;
+        const h = texture_canvas.height;
+        const replaced_color = texture_context.getImageData(coords[0], coords[1], 1, 1).data;
+        const parsed_fore_color = parse_RGBA(this.pen_color);
+        _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, coords[0], coords[1], w, h);
+        // Mirror: fill the reflected point too, matching how strokes are mirrored
+        const mx = w - 1 - coords[1];
+        const my = h - 1 - coords[0];
+        _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, mx, my, w, h);
+        this.renderer?.mark_texture_dirty();
+        this.is_dirty = true;
+        return;
+      }
       // Left button: sketch
       this.overlay_transparency = 0.9
       this.overlay_countdown = 500
@@ -514,7 +536,6 @@ export class App {
       texture_context.strokeStyle = 'black'
       texture_context.fillStyle = this.pen_color;
       texture_context.lineWidth = 1;
-      const coords = this.pointer_event_to_coordinates(event);
       this.prev_coords = [coords[0], coords[1]]
       const mirror_coords = mirror_coordinates(coords);
 
@@ -647,7 +668,7 @@ export class App {
       vertices: OVERLAY_VERTICES,
       texture: OVERLAY_TEXTURE_COORDS
     }, {
-      "uOpacity": { type: "uniform1f", value: this.overlay_transparency }
+      "uOpacity": { type: "uniform1f", value: this.active_tool === 'fill' ? 1.0 : this.overlay_transparency }
     });
 
     // End frame

@@ -1,5 +1,5 @@
 :root {
-  --canvas-size: min(100vh, 100vw);
+  --canvas-size: min(90vh, 90vw);
 }
 
 html, body {
@@ -22,6 +22,8 @@ html, body {
   height: var(--canvas-size);
   touch-action: none;
   cursor: crosshair;
+  border: 2px solid rgba(255,255,255,0.25);
+  box-sizing: border-box;
 }
 
 /* Texture canvas - same size, used for drawing texture */
@@ -119,6 +121,12 @@ html, body {
 
 #buttons .action-5 {
   background: #666;
+}
+
+#buttons #floodfill.active {
+  outline: 2px solid #4af;
+  outline-offset: 1px;
+  background: rgba(64, 170, 255, 0.25);
 }
 
 #color-picker {
