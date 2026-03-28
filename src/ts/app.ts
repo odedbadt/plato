@@ -1,7 +1,6 @@
 import * as Glsl from './glsl'
 import * as webgl_utils from './webgl_utils'
 import { WebglRenderer } from './webgl_renderer'
-import { OVERLAY_VERTICES, OVERLAY_TEXTURE_COORDS } from './geometry_data'
 function parse_RGBA(color: string): [number, number, number, number] {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = 1;
@@ -93,9 +92,7 @@ export class App {
   interval_id: ReturnType<typeof setInterval> | null = null;
   path: Path2D | null = null;
   mirror_path: Path2D | null = null;
-  overlay_transparency: number = 0.9;
-  overlay_transparency_decay_factor: number = 0.6;
-  overlay_countdown: number = 50;
+  prev_coords: [number, number] | null = null;
   active_tool: 'sketch' | 'fill' = 'sketch';
   prev_mirror_coords: number[] | null = null;
   texture_canvas: HTMLCanvasElement | null = null;
@@ -145,7 +142,6 @@ export class App {
     this.clear();
     this.init_palette();
     this.init_texture_sketcher();
-    this.init_overlay_opacity_throttle();
     this.init_actions();
     let prefered_model_name_there = false;
     this.load_model_names((model_names: string[]) => {
@@ -295,28 +291,9 @@ export class App {
     })
   }
   reset_opacity_to_opaque() {
-    this.overlay_transparency = 0.9
-    this.overlay_transparency_decay_factor = 0.6
-    this.overlay_countdown = 50
-
+    // no-op: overlay removed
   }
-  init_overlay_opacity_throttle() {
-    this.reset_opacity_to_opaque()
-    this.overlay_transparency = 0.9
-    this.overlay_countdown = 1000
-    setInterval(() => {
-      if (this.overlay_countdown > 0) {
-        this.overlay_countdown = this.overlay_countdown - 10
-      } else {
-        this.overlay_transparency = this.overlay_transparency *
-          this.overlay_transparency_decay_factor
-        this.is_dirty = true;
-      }
-    }, 100)
 
-
-
-  }
   init_canvas_sizes() {
     const dpr = this.dpr;
     const _this = this;
@@ -472,6 +449,22 @@ export class App {
     const canvas_y = event.offsetY;
     return [canvas_x * this.dpr, canvas_y * this.dpr];
   }
+  // Returns texture-canvas pixel coordinates for the surface point under the pointer,
+  // or null if the pointer is not over the model (or model has no UV data).
+  pointer_event_to_texture_coords = (event: PointerEvent): [number, number] | null => {
+    if (!this.model) return null;
+    const texture_canvas = document.getElementById("textureCanvas") as HTMLCanvasElement;
+    const model_canvas = document.getElementById("mainCanvas") as HTMLCanvasElement;
+    if (!texture_canvas || !model_canvas) return null;
+    const rect = model_canvas.getBoundingClientRect();
+    return webgl_utils.pick_uv(
+      event.offsetX, event.offsetY,
+      rect.width, rect.height,
+      texture_canvas.width, texture_canvas.height,
+      this.model,
+      this.rotation
+    );
+  }
   init_texture_sketcher() {
     const texture_canvas = document.getElementById("textureCanvas") as HTMLCanvasElement;
     const model_canvas = document.getElementById("mainCanvas") as HTMLCanvasElement;
@@ -483,10 +476,8 @@ export class App {
     const w = texture_canvas.width;
     const h = texture_canvas.height;
     const dpr = this.dpr;
-    const pointer_event_to_coordinates = (event: PointerEvent): [number, number] => {
-      const canvas_x = event.offsetX;
-      const canvas_y = event.offsetY;
-      return [canvas_x * dpr, canvas_y * dpr];
+    const pointer_event_to_coordinates = (event: PointerEvent): [number, number] | null => {
+      return this.pointer_event_to_texture_coords(event);
     }
     const mirror_coordinates = (coords: [number, number]): [number, number] => {
       return [w - coords[1], h - coords[0]]
@@ -512,25 +503,24 @@ export class App {
         model_canvas.setPointerCapture(event.pointerId);
         return;
       }
-      const coords = this.pointer_event_to_coordinates(event);
-      // Fill tool: flood-fill at the clicked canvas position
+      const coords = pointer_event_to_coordinates(event);
+      if (!coords) return;
+      // Fill tool: flood-fill at the texture position under the pointer
       if (this.active_tool === 'fill') {
-        const w = texture_canvas.width;
-        const h = texture_canvas.height;
+        const tw = texture_canvas.width;
+        const th = texture_canvas.height;
         const replaced_color = texture_context.getImageData(coords[0], coords[1], 1, 1).data;
         const parsed_fore_color = parse_RGBA(this.pen_color);
-        _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, coords[0], coords[1], w, h);
+        _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, coords[0], coords[1], tw, th);
         // Mirror: fill the reflected point too, matching how strokes are mirrored
-        const mx = w - 1 - coords[1];
-        const my = h - 1 - coords[0];
-        _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, mx, my, w, h);
+        const mx = tw - 1 - coords[1];
+        const my = th - 1 - coords[0];
+        _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, mx, my, tw, th);
         this.renderer?.mark_texture_dirty();
         this.is_dirty = true;
         return;
       }
-      // Left button: sketch
-      this.overlay_transparency = 0.9
-      this.overlay_countdown = 500
+      // Left button: start sketch stroke
       this.path = new Path2D();
       this.mirror_path = new Path2D();
       texture_context.strokeStyle = 'black'
@@ -538,14 +528,6 @@ export class App {
       texture_context.lineWidth = 1;
       this.prev_coords = [coords[0], coords[1]]
       const mirror_coords = mirror_coordinates(coords);
-
-      texture_context.beginPath();
-      //texture_context.ellipse(coords[0], coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2)
-      texture_context.fill();
-      texture_context.beginPath();
-      //texture_context.ellipse(mirror_coords[0], mirror_coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2)
-      texture_context.fill();
-      texture_context.beginPath();
 
       this.path.moveTo(coords[0], coords[1])
       this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1])
@@ -564,7 +546,7 @@ export class App {
         this.mirror_path = null;
         this.renderer?.mark_texture_dirty();
       }
-      this.prev_coords = this.pointer_event_to_coordinates(event);
+      this.prev_coords = null;
     })
     model_canvas.addEventListener("pointermove", (event) => {
       event.preventDefault();
@@ -593,42 +575,39 @@ export class App {
         }
         return;
       }
-      const coords = this.pointer_event_to_coordinates(event);
+      if (!(event.buttons & 1)) return;
+
+      const coords = pointer_event_to_coordinates(event);
+      if (!coords) return;
       const mirror_coords = mirror_coordinates(coords);
-      if (event.buttons & 1) {
-        this.reset_opacity_to_opaque()
-        if (!!(this.prev_coords && this.path && this.mirror_path)) {
-          if (dist2(coords, this.prev_coords) * dpr * dpr > 10) {
-            this.path.lineTo(coords[0], coords[1]);
-            this.mirror_path.lineTo(mirror_coords[0], mirror_coords[1]);
-            texture_context.strokeStyle = this.pen_color;
-            texture_context.lineWidth = this.pen_radius * 2;
-            texture_context.stroke(this.path)
-            texture_context.stroke(this.mirror_path)
-          } else {
-            this.path.moveTo(coords[0], coords[1]);
-            this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1]);
 
-          }
+      this.reset_opacity_to_opaque()
+      if (this.prev_coords && this.path && this.mirror_path) {
+        if (dist2(coords, this.prev_coords) > 4) {
+          this.path.lineTo(coords[0], coords[1]);
+          this.mirror_path.lineTo(mirror_coords[0], mirror_coords[1]);
+          texture_context.strokeStyle = this.pen_color;
+          texture_context.lineWidth = this.pen_radius * 2;
+          texture_context.stroke(this.path)
+          texture_context.stroke(this.mirror_path)
+        } else {
+          this.path.moveTo(coords[0], coords[1]);
+          this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1]);
         }
-        this.prev_coords = [coords[0], coords[1]];
-        this.prev_mirror_coords = [mirror_coords[0], mirror_coords[1]];
-
-        texture_context.fillStyle = this.pen_color;
-        texture_context.beginPath();
-        texture_context.ellipse(coords[0], coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2)
-        //        texture_context.ellipse(coords[0], coords[1], 30, 30, 0, 0, Math.PI * 2)
-        texture_context.fill();
-        texture_context.lineWidth = 0;
-        texture_context.beginPath();
-        texture_context.ellipse(mirror_coords[0], mirror_coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2)
-        texture_context.fill();
-        texture_context.beginPath();
-        texture_context.lineWidth = this.pen_radius;
-        this.is_dirty = true;
-        this.renderer?.mark_texture_dirty();
       }
+      this.prev_coords = [coords[0], coords[1]];
+      this.prev_mirror_coords = [mirror_coords[0], mirror_coords[1]];
 
+      texture_context.fillStyle = this.pen_color;
+      texture_context.beginPath();
+      texture_context.ellipse(coords[0], coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2)
+      texture_context.fill();
+      texture_context.lineWidth = 0;
+      texture_context.beginPath();
+      texture_context.ellipse(mirror_coords[0], mirror_coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2)
+      texture_context.fill();
+      this.is_dirty = true;
+      this.renderer?.mark_texture_dirty();
     })
 
   }
@@ -662,14 +641,6 @@ export class App {
         normals: this.model.mirror_normals
       }, uniforms);
     }
-
-    // Draw overlay
-    this.renderer.draw_overlay({
-      vertices: OVERLAY_VERTICES,
-      texture: OVERLAY_TEXTURE_COORDS
-    }, {
-      "uOpacity": { type: "uniform1f", value: this.active_tool === 'fill' ? 1.0 : this.overlay_transparency }
-    });
 
     // End frame
     this.renderer.end_frame();
