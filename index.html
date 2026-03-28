@@ -31,6 +31,32 @@
 
   <!-- Toggle button for controls -->
   <button id="controls-toggle">☰</button>
+
+  <!-- Floating clear button -->
+  <button id="clear-btn" class="floating-btn" title="Clear drawing">
+    <svg viewBox="0 0 20 20" fill="white" xmlns="http://www.w3.org/2000/svg">
+      <rect x="7" y="2" width="6" height="2" rx="1"/>
+      <rect x="3" y="4" width="14" height="2" rx="1"/>
+      <path d="M5 7h10l-1 10H6L5 7z" fill="white"/>
+    </svg>
+  </button>
+
+  <!-- Floating model picker button -->
+  <button id="model-picker-btn" class="floating-btn" title="Choose model">
+    <svg viewBox="0 0 20 20" fill="white" xmlns="http://www.w3.org/2000/svg">
+      <rect x="2"  y="2"  width="7" height="7" rx="1.5"/>
+      <rect x="11" y="2"  width="7" height="7" rx="1.5"/>
+      <rect x="2"  y="11" width="7" height="7" rx="1.5"/>
+      <rect x="11" y="11" width="7" height="7" rx="1.5"/>
+    </svg>
+  </button>
+
+  <!-- Model picker modal -->
+  <div id="model-picker-overlay" class="hidden">
+    <div id="model-picker-modal">
+      <div id="model-picker-grid"></div>
+    </div>
+  </div>
   <!-- Controls panel -->
   <div id="controls-panel" class="hidden">
     <div id="buttons">

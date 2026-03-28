@@ -5681,10 +5681,75 @@ class App {
                 model_canvas.style.cursor = is_fill ? 'cell' : 'crosshair';
             this.is_dirty = true;
         });
+        // Floating clear button (outside controls panel)
+        document.getElementById('clear-btn')?.addEventListener('click', () => this.clear());
+        // Model picker open button
+        document.getElementById('model-picker-btn')?.addEventListener('click', () => this.open_model_picker());
+        // Close modal when clicking the backdrop
+        const overlay = document.getElementById('model-picker-overlay');
+        overlay?.addEventListener('click', (e) => {
+            if (e.target === overlay)
+                overlay.classList.add('hidden');
+        });
     }
     // const pen_size = pen_size_div).backgroundpen_size;
     // console.log(pen_size)
     // this.pen_pen_size = pen_size;
+    // Resolves with the model JSON, checking name-based cache first.
+    load_model_promise(model_name) {
+        const cached = this.cache.getItem(model_name);
+        if (cached)
+            return Promise.resolve(JSON.parse(cached));
+        return new Promise((resolve) => {
+            this.load_model(this.construct_url_for_name(model_name), resolve);
+        });
+    }
+    async open_model_picker() {
+        const overlay = document.getElementById('model-picker-overlay');
+        const grid = document.getElementById('model-picker-grid');
+        if (!overlay || !grid)
+            return;
+        overlay.classList.remove('hidden');
+        // Thumbnails are rendered once and cached as <img> elements in the grid.
+        if (grid.children.length > 0)
+            return;
+        const model_names = this.model_names || [];
+        // Single shared offscreen renderer reused for every thumbnail.
+        const size = 128;
+        const thumb_canvas = document.createElement('canvas');
+        thumb_canvas.width = size;
+        thumb_canvas.height = size;
+        const thumb_tex = document.createElement('canvas');
+        thumb_tex.width = 1;
+        thumb_tex.height = 1;
+        const thumb_renderer = new _webgl_renderer__WEBPACK_IMPORTED_MODULE_1__.WebglRenderer(thumb_canvas, thumb_tex, true);
+        const rot = gl_matrix__WEBPACK_IMPORTED_MODULE_2__.create();
+        gl_matrix__WEBPACK_IMPORTED_MODULE_2__.rotateX(rot, rot, Math.PI / 4);
+        gl_matrix__WEBPACK_IMPORTED_MODULE_2__.rotateY(rot, rot, Math.PI / 5);
+        const uniforms = _webgl_utils__WEBPACK_IMPORTED_MODULE_0__.matrix_uniforms(rot);
+        for (const name of model_names) {
+            const model = await this.load_model_promise(name);
+            if (!model?.vertices)
+                continue;
+            thumb_renderer.begin_frame();
+            thumb_renderer.draw_model(model, uniforms);
+            thumb_renderer.end_frame();
+            const url = thumb_canvas.toDataURL();
+            const card = document.createElement('div');
+            card.className = 'model-thumb-card';
+            const img = document.createElement('img');
+            img.src = url;
+            img.alt = name;
+            card.appendChild(img);
+            card.addEventListener('click', () => {
+                this.load_and_set_model(name, () => { });
+                this.clear();
+                overlay.classList.add('hidden');
+            });
+            grid.appendChild(card);
+        }
+        thumb_renderer.renderer.dispose();
+    }
     draw_pen_selector() {
         const pen_canvas = document.getElementById("penCanvas");
         if (!pen_canvas)
@@ -6090,7 +6155,7 @@ __webpack_require__.r(__webpack_exports__);
 // WebglRenderer: Stateful bridge using Three.js WebGLRenderer
 // webgl_utils provides geometry/texture helpers; this class owns the scene lifecycle
 class WebglRenderer {
-    constructor(main_canvas, texture_canvas) {
+    constructor(main_canvas, texture_canvas, preserve_buffer = false) {
         this.texture_dirty = true;
         // Geometry caches — avoid re-creating Float32Arrays + GPU uploads every frame
         this.cached_model = null;
@@ -6098,7 +6163,7 @@ class WebglRenderer {
         this.cached_mirrors_verts = null;
         this.cached_mirrors_geo = null;
         this.texture_canvas = texture_canvas;
-        this.renderer = new three__WEBPACK_IMPORTED_MODULE_0__.WebGLRenderer({ canvas: main_canvas, alpha: true });
+        this.renderer = new three__WEBPACK_IMPORTED_MODULE_0__.WebGLRenderer({ canvas: main_canvas, alpha: true, preserveDrawingBuffer: preserve_buffer });
         this.renderer.autoClear = false;
         this.texture = (0,_webgl_utils__WEBPACK_IMPORTED_MODULE_2__.create_canvas_texture)(texture_canvas);
         this.main_material = new three__WEBPACK_IMPORTED_MODULE_0__.RawShaderMaterial({
