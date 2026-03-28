@@ -24,9 +24,9 @@ export class WebglRenderer {
   private cached_mirrors_verts: Array<number> | null = null;
   private cached_mirrors_geo: THREE.BufferGeometry | null = null;
 
-  constructor(main_canvas: HTMLCanvasElement, texture_canvas: HTMLCanvasElement) {
+  constructor(main_canvas: HTMLCanvasElement, texture_canvas: HTMLCanvasElement, preserve_buffer = false) {
     this.texture_canvas = texture_canvas;
-    this.renderer = new THREE.WebGLRenderer({ canvas: main_canvas, alpha: true });
+    this.renderer = new THREE.WebGLRenderer({ canvas: main_canvas, alpha: true, preserveDrawingBuffer: preserve_buffer });
     this.renderer.autoClear = false;
 
     this.texture = create_canvas_texture(texture_canvas);

@@ -61,6 +61,75 @@ html, body {
   background: rgba(255,255,255,0.35);
 }
 
+/* Shared style for all floating action buttons */
+.floating-btn {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  z-index: 1000;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.2);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  box-sizing: border-box;
+}
+.floating-btn:hover { background: rgba(255,255,255,0.35); }
+.floating-btn svg { width: 100%; height: 100%; }
+
+#clear-btn       { top: calc(max(16px, env(safe-area-inset-top)) + 54px); }
+#model-picker-btn { top: calc(max(16px, env(safe-area-inset-top)) + 108px); }
+
+/* Model picker modal */
+#model-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(0,0,0,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#model-picker-overlay.hidden { display: none; }
+
+#model-picker-modal {
+  width: min(92vw, 560px);
+  max-height: 80vh;
+  overflow-y: auto;
+  background: rgba(20,20,20,0.97);
+  border-radius: 16px;
+  padding: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+
+#model-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.model-thumb-card {
+  cursor: pointer;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.05);
+  aspect-ratio: 1;
+  transition: background 0.15s;
+}
+.model-thumb-card:hover,
+.model-thumb-card:active { background: rgba(255,255,255,0.2); }
+.model-thumb-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 #spin-toggle {
   position: fixed;
   top: 70px;

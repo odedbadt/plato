@@ -380,11 +380,81 @@ export class App {
       if (model_canvas) model_canvas.style.cursor = is_fill ? 'cell' : 'crosshair';
       this.is_dirty = true;
     })
+
+    // Floating clear button (outside controls panel)
+    document.getElementById('clear-btn')?.addEventListener('click', () => this.clear());
+
+    // Model picker open button
+    document.getElementById('model-picker-btn')?.addEventListener('click', () => this.open_model_picker());
+
+    // Close modal when clicking the backdrop
+    const overlay = document.getElementById('model-picker-overlay');
+    overlay?.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.classList.add('hidden');
+    });
   }
   // const pen_size = pen_size_div).backgroundpen_size;
   // console.log(pen_size)
   // this.pen_pen_size = pen_size;
 
+  // Resolves with the model JSON, checking name-based cache first.
+  load_model_promise(model_name: string): Promise<any> {
+    const cached = this.cache.getItem(model_name);
+    if (cached) return Promise.resolve(JSON.parse(cached));
+    return new Promise((resolve) => {
+      this.load_model(this.construct_url_for_name(model_name), resolve);
+    });
+  }
+
+  async open_model_picker() {
+    const overlay = document.getElementById('model-picker-overlay');
+    const grid = document.getElementById('model-picker-grid');
+    if (!overlay || !grid) return;
+    overlay.classList.remove('hidden');
+
+    // Thumbnails are rendered once and cached as <img> elements in the grid.
+    if (grid.children.length > 0) return;
+
+    const model_names = this.model_names || [];
+
+    // Single shared offscreen renderer reused for every thumbnail.
+    const size = 128;
+    const thumb_canvas = document.createElement('canvas');
+    thumb_canvas.width = size; thumb_canvas.height = size;
+    const thumb_tex = document.createElement('canvas');
+    thumb_tex.width = 1; thumb_tex.height = 1;
+    const thumb_renderer = new WebglRenderer(thumb_canvas, thumb_tex, true);
+
+    const rot = glMatrix.quat.create();
+    glMatrix.quat.rotateX(rot, rot, Math.PI / 4);
+    glMatrix.quat.rotateY(rot, rot, Math.PI / 5);
+    const uniforms = webgl_utils.matrix_uniforms(rot);
+
+    for (const name of model_names) {
+      const model = await this.load_model_promise(name);
+      if (!model?.vertices) continue;
+
+      thumb_renderer.begin_frame();
+      thumb_renderer.draw_model(model, uniforms);
+      thumb_renderer.end_frame();
+      const url = thumb_canvas.toDataURL();
+
+      const card = document.createElement('div');
+      card.className = 'model-thumb-card';
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = name;
+      card.appendChild(img);
+      card.addEventListener('click', () => {
+        this.load_and_set_model(name, () => {});
+        this.clear();
+        overlay.classList.add('hidden');
+      });
+      grid.appendChild(card);
+    }
+
+    thumb_renderer.renderer.dispose();
+  }
 
   draw_pen_selector() {
     const pen_canvas = document.getElementById("penCanvas") as HTMLCanvasElement;
