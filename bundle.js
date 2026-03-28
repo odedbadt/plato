@@ -5771,7 +5771,7 @@ class App {
             return [canvas_x * dpr, canvas_y * dpr];
         };
         const mirror_coordinates = (coords) => {
-            return [w - coords[0], h - coords[1]];
+            return [w - coords[1], h - coords[0]];
         };
         const dist2 = (v1, v2) => {
             const mn = [v1[0] - v2[0], v1[1] - v2[1]];
