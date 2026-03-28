@@ -5316,10 +5316,8 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ });
 /* harmony import */ var _webgl_utils__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./webgl_utils */ "./src/ts/webgl_utils.ts");
 /* harmony import */ var _webgl_renderer__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./webgl_renderer */ "./src/ts/webgl_renderer.ts");
-/* harmony import */ var _geometry_data__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./geometry_data */ "./src/ts/geometry_data.ts");
-/* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/quat.js");
-/* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/vec3.js");
-
+/* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/quat.js");
+/* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/vec3.js");
 
 
 function parse_RGBA(color) {
@@ -5346,8 +5344,16 @@ function _floodfill(read_ctx, write_ctx, replaced_color, new_color, x, y, w, h) 
     const [nr, ng, nb, na] = new_color;
     if (tr === nr && tg === ng && tb === nb && ta === na)
         return;
-    const stack = [Math.round(y) * w + Math.round(x)];
     const visited = new Uint8Array(w * h);
+    const stack = [];
+    const enqueue = (px, py) => {
+        if (px < 0 || py < 0 || px >= w || py >= h)
+            return;
+        const idx = py * w + px;
+        if (!visited[idx])
+            stack.push(idx);
+    };
+    enqueue(Math.round(x), Math.round(y));
     while (stack.length > 0) {
         const idx = stack.pop();
         if (visited[idx])
@@ -5362,14 +5368,10 @@ function _floodfill(read_ctx, write_ctx, replaced_color, new_color, x, y, w, h) 
         data[pixel_offset + 2] = nb;
         data[pixel_offset + 3] = na;
         const px = idx % w, py = Math.floor(idx / w);
-        if (px > 0)
-            stack.push(idx - 1);
-        if (px < w - 1)
-            stack.push(idx + 1);
-        if (py > 0)
-            stack.push(idx - w);
-        if (py < h - 1)
-            stack.push(idx + w);
+        enqueue(px - 1, py);
+        enqueue(px + 1, py);
+        enqueue(px, py - 1);
+        enqueue(px, py + 1);
     }
     write_ctx.putImageData(image_data, 0, 0);
 }
@@ -5378,10 +5380,10 @@ function _floodfill(read_ctx, write_ctx, replaced_color, new_color, x, y, w, h) 
 function project_to_sphere(x, y) {
     const r2 = x * x + y * y;
     if (r2 <= 1.0) {
-        return gl_matrix__WEBPACK_IMPORTED_MODULE_4__.fromValues(x, y, Math.sqrt(1.0 - r2));
+        return gl_matrix__WEBPACK_IMPORTED_MODULE_3__.fromValues(x, y, Math.sqrt(1.0 - r2));
     }
     const r = Math.sqrt(r2);
-    return gl_matrix__WEBPACK_IMPORTED_MODULE_4__.fromValues(x / r, y / r, 0);
+    return gl_matrix__WEBPACK_IMPORTED_MODULE_3__.fromValues(x / r, y / r, 0);
 }
 class App {
     constructor(prefered_model_name, spinning_speed = 0, pen_color = null, pen_radius = null) {
@@ -5392,10 +5394,8 @@ class App {
         this.interval_id = null;
         this.path = null;
         this.mirror_path = null;
-        this.overlay_transparency = 0.9;
-        this.overlay_transparency_decay_factor = 0.6;
-        this.overlay_countdown = 50;
         this.prev_coords = null;
+        this.active_tool = 'sketch';
         this.prev_mirror_coords = null;
         this.texture_canvas = null;
         this.renderer = null;
@@ -5404,11 +5404,23 @@ class App {
             const canvas_y = event.offsetY;
             return [canvas_x * this.dpr, canvas_y * this.dpr];
         };
+        // Returns texture-canvas pixel coordinates for the surface point under the pointer,
+        // or null if the pointer is not over the model (or model has no UV data).
+        this.pointer_event_to_texture_coords = (event) => {
+            if (!this.model)
+                return null;
+            const texture_canvas = document.getElementById("textureCanvas");
+            const model_canvas = document.getElementById("mainCanvas");
+            if (!texture_canvas || !model_canvas)
+                return null;
+            const rect = model_canvas.getBoundingClientRect();
+            return _webgl_utils__WEBPACK_IMPORTED_MODULE_0__.pick_uv(event.offsetX, event.offsetY, rect.width, rect.height, texture_canvas.width, texture_canvas.height, this.model, this.rotation);
+        };
         this.prefered_model_name = prefered_model_name;
         this.model = null;
         this.spinning_speed = 0;
-        this.rotation = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create();
-        gl_matrix__WEBPACK_IMPORTED_MODULE_3__.rotateX(this.rotation, this.rotation, Math.PI / 3);
+        this.rotation = gl_matrix__WEBPACK_IMPORTED_MODULE_2__.create();
+        gl_matrix__WEBPACK_IMPORTED_MODULE_2__.rotateX(this.rotation, this.rotation, Math.PI / 3);
         this.pen_color = pen_color || 'green';
         this.pen_radius = pen_radius || 5;
         this.dpr = window.devicePixelRatio;
@@ -5445,7 +5457,6 @@ class App {
         this.clear();
         this.init_palette();
         this.init_texture_sketcher();
-        this.init_overlay_opacity_throttle();
         this.init_actions();
         let prefered_model_name_there = false;
         this.load_model_names((model_names) => {
@@ -5586,24 +5597,7 @@ class App {
         });
     }
     reset_opacity_to_opaque() {
-        this.overlay_transparency = 0.9;
-        this.overlay_transparency_decay_factor = 0.6;
-        this.overlay_countdown = 50;
-    }
-    init_overlay_opacity_throttle() {
-        this.reset_opacity_to_opaque();
-        this.overlay_transparency = 0.9;
-        this.overlay_countdown = 1000;
-        setInterval(() => {
-            if (this.overlay_countdown > 0) {
-                this.overlay_countdown = this.overlay_countdown - 10;
-            }
-            else {
-                this.overlay_transparency = this.overlay_transparency *
-                    this.overlay_transparency_decay_factor;
-                this.is_dirty = true;
-            }
-        }, 100);
+        // no-op: overlay removed
     }
     init_canvas_sizes() {
         const dpr = this.dpr;
@@ -5675,19 +5669,14 @@ class App {
         }
         // TODO: fix floodfill later
         const floodfill_div = document.getElementById('floodfill');
-        floodfill_div?.addEventListener('click', (event) => {
-            const texture_canvas_element = document.getElementById('textureCanvas');
-            if (!texture_canvas_element)
-                return;
-            const texture_canvas_context = texture_canvas_element.getContext('2d', { 'willReadFrequently': true });
-            if (!texture_canvas_context)
-                return;
-            const coords = this.pointer_event_to_coordinates(event);
-            const w = texture_canvas_element.width;
-            const h = texture_canvas_element.height;
-            const replaced_color = texture_canvas_context.getImageData(coords[0], coords[1], 1, 1).data;
-            const parsed_fore_color = parse_RGBA(this.pen_color);
-            _floodfill(texture_canvas_context, texture_canvas_context, replaced_color, parsed_fore_color, coords[0], coords[1], w, h);
+        floodfill_div?.addEventListener('click', () => {
+            this.active_tool = this.active_tool === 'fill' ? 'sketch' : 'fill';
+            const is_fill = this.active_tool === 'fill';
+            floodfill_div.classList.toggle('active', is_fill);
+            const model_canvas = document.getElementById('mainCanvas');
+            if (model_canvas)
+                model_canvas.style.cursor = is_fill ? 'cell' : 'crosshair';
+            this.is_dirty = true;
         });
     }
     // const pen_size = pen_size_div).backgroundpen_size;
@@ -5766,9 +5755,7 @@ class App {
         const h = texture_canvas.height;
         const dpr = this.dpr;
         const pointer_event_to_coordinates = (event) => {
-            const canvas_x = event.offsetX;
-            const canvas_y = event.offsetY;
-            return [canvas_x * dpr, canvas_y * dpr];
+            return this.pointer_event_to_texture_coords(event);
         };
         const mirror_coordinates = (coords) => {
             return [w - coords[1], h - coords[0]];
@@ -5794,24 +5781,32 @@ class App {
                 model_canvas.setPointerCapture(event.pointerId);
                 return;
             }
-            // Left button: sketch
-            this.overlay_transparency = 0.9;
-            this.overlay_countdown = 500;
+            const coords = pointer_event_to_coordinates(event);
+            if (!coords)
+                return;
+            // Fill tool: flood-fill at the texture position under the pointer
+            if (this.active_tool === 'fill') {
+                const tw = texture_canvas.width;
+                const th = texture_canvas.height;
+                const replaced_color = texture_context.getImageData(coords[0], coords[1], 1, 1).data;
+                const parsed_fore_color = parse_RGBA(this.pen_color);
+                _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, coords[0], coords[1], tw, th);
+                // Mirror: fill the reflected point too, matching how strokes are mirrored
+                const mx = tw - 1 - coords[1];
+                const my = th - 1 - coords[0];
+                _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, mx, my, tw, th);
+                this.renderer?.mark_texture_dirty();
+                this.is_dirty = true;
+                return;
+            }
+            // Left button: start sketch stroke
             this.path = new Path2D();
             this.mirror_path = new Path2D();
             texture_context.strokeStyle = 'black';
             texture_context.fillStyle = this.pen_color;
             texture_context.lineWidth = 1;
-            const coords = this.pointer_event_to_coordinates(event);
             this.prev_coords = [coords[0], coords[1]];
             const mirror_coords = mirror_coordinates(coords);
-            texture_context.beginPath();
-            //texture_context.ellipse(coords[0], coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2)
-            texture_context.fill();
-            texture_context.beginPath();
-            //texture_context.ellipse(mirror_coords[0], mirror_coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2)
-            texture_context.fill();
-            texture_context.beginPath();
             this.path.moveTo(coords[0], coords[1]);
             this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1]);
         });
@@ -5830,7 +5825,7 @@ class App {
                 this.mirror_path = null;
                 this.renderer?.mark_texture_dirty();
             }
-            this.prev_coords = this.pointer_event_to_coordinates(event);
+            this.prev_coords = null;
         });
         model_canvas.addEventListener("pointermove", (event) => {
             event.preventDefault();
@@ -5842,51 +5837,50 @@ class App {
                 const cy = event.clientY - rect.top;
                 const v_from = project_to_sphere((cx - event.movementX - rect.width / 2) * scale, -(cy - event.movementY - rect.height / 2) * scale);
                 const v_to = project_to_sphere((cx - rect.width / 2) * scale, -(cy - rect.height / 2) * scale);
-                const axis = gl_matrix__WEBPACK_IMPORTED_MODULE_4__.cross(gl_matrix__WEBPACK_IMPORTED_MODULE_4__.create(), v_from, v_to);
-                const angle = Math.acos(Math.min(1.0, gl_matrix__WEBPACK_IMPORTED_MODULE_4__.dot(v_from, v_to)));
-                if (gl_matrix__WEBPACK_IMPORTED_MODULE_4__.length(axis) > 1e-6) {
-                    gl_matrix__WEBPACK_IMPORTED_MODULE_4__.normalize(axis, axis);
-                    const delta = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.setAxisAngle(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), axis, angle);
-                    gl_matrix__WEBPACK_IMPORTED_MODULE_3__.multiply(this.rotation, delta, this.rotation);
-                    gl_matrix__WEBPACK_IMPORTED_MODULE_3__.normalize(this.rotation, this.rotation);
+                const axis = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.cross(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), v_from, v_to);
+                const angle = Math.acos(Math.min(1.0, gl_matrix__WEBPACK_IMPORTED_MODULE_3__.dot(v_from, v_to)));
+                if (gl_matrix__WEBPACK_IMPORTED_MODULE_3__.length(axis) > 1e-6) {
+                    gl_matrix__WEBPACK_IMPORTED_MODULE_3__.normalize(axis, axis);
+                    const delta = gl_matrix__WEBPACK_IMPORTED_MODULE_2__.setAxisAngle(gl_matrix__WEBPACK_IMPORTED_MODULE_2__.create(), axis, angle);
+                    gl_matrix__WEBPACK_IMPORTED_MODULE_2__.multiply(this.rotation, delta, this.rotation);
+                    gl_matrix__WEBPACK_IMPORTED_MODULE_2__.normalize(this.rotation, this.rotation);
                     this.is_dirty = true;
                 }
                 return;
             }
-            const coords = this.pointer_event_to_coordinates(event);
+            if (!(event.buttons & 1))
+                return;
+            const coords = pointer_event_to_coordinates(event);
+            if (!coords)
+                return;
             const mirror_coords = mirror_coordinates(coords);
-            if (event.buttons & 1) {
-                this.reset_opacity_to_opaque();
-                if (!!(this.prev_coords && this.path && this.mirror_path)) {
-                    if (dist2(coords, this.prev_coords) * dpr * dpr > 10) {
-                        this.path.lineTo(coords[0], coords[1]);
-                        this.mirror_path.lineTo(mirror_coords[0], mirror_coords[1]);
-                        texture_context.strokeStyle = this.pen_color;
-                        texture_context.lineWidth = this.pen_radius * 2;
-                        texture_context.stroke(this.path);
-                        texture_context.stroke(this.mirror_path);
-                    }
-                    else {
-                        this.path.moveTo(coords[0], coords[1]);
-                        this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1]);
-                    }
+            this.reset_opacity_to_opaque();
+            if (this.prev_coords && this.path && this.mirror_path) {
+                if (dist2(coords, this.prev_coords) > 4) {
+                    this.path.lineTo(coords[0], coords[1]);
+                    this.mirror_path.lineTo(mirror_coords[0], mirror_coords[1]);
+                    texture_context.strokeStyle = this.pen_color;
+                    texture_context.lineWidth = this.pen_radius * 2;
+                    texture_context.stroke(this.path);
+                    texture_context.stroke(this.mirror_path);
                 }
-                this.prev_coords = [coords[0], coords[1]];
-                this.prev_mirror_coords = [mirror_coords[0], mirror_coords[1]];
-                texture_context.fillStyle = this.pen_color;
-                texture_context.beginPath();
-                texture_context.ellipse(coords[0], coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2);
-                //        texture_context.ellipse(coords[0], coords[1], 30, 30, 0, 0, Math.PI * 2)
-                texture_context.fill();
-                texture_context.lineWidth = 0;
-                texture_context.beginPath();
-                texture_context.ellipse(mirror_coords[0], mirror_coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2);
-                texture_context.fill();
-                texture_context.beginPath();
-                texture_context.lineWidth = this.pen_radius;
-                this.is_dirty = true;
-                this.renderer?.mark_texture_dirty();
+                else {
+                    this.path.moveTo(coords[0], coords[1]);
+                    this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1]);
+                }
             }
+            this.prev_coords = [coords[0], coords[1]];
+            this.prev_mirror_coords = [mirror_coords[0], mirror_coords[1]];
+            texture_context.fillStyle = this.pen_color;
+            texture_context.beginPath();
+            texture_context.ellipse(coords[0], coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2);
+            texture_context.fill();
+            texture_context.lineWidth = 0;
+            texture_context.beginPath();
+            texture_context.ellipse(mirror_coords[0], mirror_coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2);
+            texture_context.fill();
+            this.is_dirty = true;
+            this.renderer?.mark_texture_dirty();
         });
     }
     draw_model() {
@@ -5914,13 +5908,6 @@ class App {
                 normals: this.model.mirror_normals
             }, uniforms);
         }
-        // Draw overlay
-        this.renderer.draw_overlay({
-            vertices: _geometry_data__WEBPACK_IMPORTED_MODULE_2__.OVERLAY_VERTICES,
-            texture: _geometry_data__WEBPACK_IMPORTED_MODULE_2__.OVERLAY_TEXTURE_COORDS
-        }, {
-            "uOpacity": { type: "uniform1f", value: this.overlay_transparency }
-        });
         // End frame
         this.renderer.end_frame();
     }
@@ -5930,39 +5917,6 @@ class App {
         }
     }
 }
-
-
-/***/ },
-
-/***/ "./src/ts/geometry_data.ts"
-/*!*********************************!*\
-  !*** ./src/ts/geometry_data.ts ***!
-  \*********************************/
-(__unused_webpack_module, __webpack_exports__, __webpack_require__) {
-
-__webpack_require__.r(__webpack_exports__);
-/* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   OVERLAY_TEXTURE_COORDS: () => (/* binding */ OVERLAY_TEXTURE_COORDS),
-/* harmony export */   OVERLAY_VERTICES: () => (/* binding */ OVERLAY_VERTICES)
-/* harmony export */ });
-// Geometry data - flat arrays for models
-// Full-screen quad for overlay (2 triangles) - z=0 for middle of clip space
-const OVERLAY_VERTICES = [
-    -1, -1, 0,
-    1, -1, 0,
-    -1, 1, 0,
-    1, 1, 0,
-    1, -1, 0,
-    -1, 1, 0
-];
-const OVERLAY_TEXTURE_COORDS = [
-    0, 1,
-    1, 1,
-    0, 0,
-    1, 0,
-    1, 1,
-    0, 0
-];
 
 
 /***/ },
@@ -6197,13 +6151,83 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   create_canvas_texture: () => (/* binding */ create_canvas_texture),
 /* harmony export */   matrix_uniforms: () => (/* binding */ matrix_uniforms),
-/* harmony export */   model_to_geometry: () => (/* binding */ model_to_geometry)
+/* harmony export */   model_to_geometry: () => (/* binding */ model_to_geometry),
+/* harmony export */   pick_uv: () => (/* binding */ pick_uv)
 /* harmony export */ });
 /* harmony import */ var three__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! three */ "./node_modules/three/build/three.module.js");
 /* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/mat3.js");
 /* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/mat4.js");
+/* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/vec3.js");
+/* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/vec4.js");
 
 
+// Möller–Trumbore ray-triangle intersection.
+// Returns barycentric (u, v) and ray distance t, or null on miss.
+function ray_triangle_intersect(orig, dir, v0, v1, v2) {
+    const EPSILON = 1e-8;
+    const edge1 = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.subtract(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), v1, v0);
+    const edge2 = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.subtract(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), v2, v0);
+    const h = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.cross(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), dir, edge2);
+    const a = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.dot(edge1, h);
+    if (Math.abs(a) < EPSILON)
+        return null;
+    const f = 1.0 / a;
+    const s = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.subtract(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), orig, v0);
+    const u = f * gl_matrix__WEBPACK_IMPORTED_MODULE_3__.dot(s, h);
+    if (u < 0.0 || u > 1.0)
+        return null;
+    const q = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.cross(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), s, edge1);
+    const v = f * gl_matrix__WEBPACK_IMPORTED_MODULE_3__.dot(dir, q);
+    if (v < 0.0 || u + v > 1.0)
+        return null;
+    const t = f * gl_matrix__WEBPACK_IMPORTED_MODULE_3__.dot(edge2, q);
+    if (t < EPSILON)
+        return null;
+    return { t, u, v };
+}
+// Cast a ray from screen position (css_x, css_y) through the 3D model and
+// return the corresponding texture pixel coordinates [tx, ty], or null if no hit.
+function pick_uv(css_x, css_y, css_width, css_height, texture_width, texture_height, model, rotation) {
+    if (!model.texture)
+        return null;
+    const { projector, model_transformer } = matrix_uniforms(rotation);
+    const proj = projector.value;
+    const mt = model_transformer.value;
+    // NDC of the mouse position
+    const nx = (css_x / css_width) * 2 - 1;
+    const ny = 1 - (css_y / css_height) * 2;
+    // Unproject near/far clip points to world space to form a ray
+    const inv_proj = gl_matrix__WEBPACK_IMPORTED_MODULE_2__.invert(gl_matrix__WEBPACK_IMPORTED_MODULE_2__.create(), proj);
+    const near4 = gl_matrix__WEBPACK_IMPORTED_MODULE_4__.fromValues(nx, ny, -1, 1);
+    gl_matrix__WEBPACK_IMPORTED_MODULE_4__.transformMat4(near4, near4, inv_proj);
+    const ray_origin = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.fromValues(near4[0] / near4[3], near4[1] / near4[3], near4[2] / near4[3]);
+    const far4 = gl_matrix__WEBPACK_IMPORTED_MODULE_4__.fromValues(nx, ny, 1, 1);
+    gl_matrix__WEBPACK_IMPORTED_MODULE_4__.transformMat4(far4, far4, inv_proj);
+    const far_pt = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.fromValues(far4[0] / far4[3], far4[1] / far4[3], far4[2] / far4[3]);
+    const ray_dir = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.normalize(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), gl_matrix__WEBPACK_IMPORTED_MODULE_3__.subtract(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), far_pt, ray_origin));
+    const verts = model.vertices;
+    const uvs = model.texture;
+    const n_tri = Math.floor(verts.length / 9);
+    let best_t = Infinity;
+    let best_uv = null;
+    for (let i = 0; i < n_tri; i++) {
+        const vb = i * 9, ub = i * 6;
+        const v0 = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.transformMat3(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), gl_matrix__WEBPACK_IMPORTED_MODULE_3__.fromValues(verts[vb], verts[vb + 1], verts[vb + 2]), mt);
+        const v1 = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.transformMat3(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), gl_matrix__WEBPACK_IMPORTED_MODULE_3__.fromValues(verts[vb + 3], verts[vb + 4], verts[vb + 5]), mt);
+        const v2 = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.transformMat3(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), gl_matrix__WEBPACK_IMPORTED_MODULE_3__.fromValues(verts[vb + 6], verts[vb + 7], verts[vb + 8]), mt);
+        const hit = ray_triangle_intersect(ray_origin, ray_dir, v0, v1, v2);
+        if (hit && hit.t < best_t) {
+            best_t = hit.t;
+            const u0 = uvs[ub], v0_ = uvs[ub + 1];
+            const u1 = uvs[ub + 2], v1_ = uvs[ub + 3];
+            const u2 = uvs[ub + 4], v2_ = uvs[ub + 5];
+            const tex_u = u0 + hit.u * (u1 - u0) + hit.v * (u2 - u0);
+            const tex_v = v0_ + hit.u * (v1_ - v0_) + hit.v * (v2_ - v0_);
+            best_uv = [tex_u * texture_width, tex_v * texture_height];
+        }
+    }
+    return best_uv;
+}
 function matrix_uniforms(rotation) {
     const rotation_matrix_4x4 = gl_matrix__WEBPACK_IMPORTED_MODULE_2__.create();
     gl_matrix__WEBPACK_IMPORTED_MODULE_2__.fromQuat(rotation_matrix_4x4, rotation);
