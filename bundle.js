@@ -5399,6 +5399,9 @@ class App {
         this.prev_mirror_coords = null;
         this.texture_canvas = null;
         this.renderer = null;
+        // Multi-touch state
+        this.active_pointers = new Map();
+        this.rotating = false;
         this.pointer_event_to_coordinates = (event) => {
             const canvas_x = event.offsetX;
             const canvas_y = event.offsetY;
@@ -5764,7 +5767,6 @@ class App {
             const mn = [v1[0] - v2[0], v1[1] - v2[1]];
             return mn[0] * mn[0] + mn[1] * mn[1];
         };
-        const _this = this;
         // Prevent right-click context menu over the canvas at the document level
         document.addEventListener("contextmenu", (event) => {
             if (event.target === model_canvas)
@@ -5774,47 +5776,21 @@ class App {
             if (event.button === 2)
                 event.preventDefault();
         });
-        model_canvas.addEventListener("pointerdown", (event) => {
-            if (event.button === 2) {
-                // Right button: rotate
-                event.preventDefault();
-                model_canvas.setPointerCapture(event.pointerId);
-                return;
-            }
-            const coords = pointer_event_to_coordinates(event);
-            if (!coords)
-                return;
-            // Fill tool: flood-fill at the texture position under the pointer
-            if (this.active_tool === 'fill') {
-                const tw = texture_canvas.width;
-                const th = texture_canvas.height;
-                const replaced_color = texture_context.getImageData(coords[0], coords[1], 1, 1).data;
-                const parsed_fore_color = parse_RGBA(this.pen_color);
-                _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, coords[0], coords[1], tw, th);
-                // Mirror: fill the reflected point too, matching how strokes are mirrored
-                const mx = tw - 1 - coords[1];
-                const my = th - 1 - coords[0];
-                _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, mx, my, tw, th);
-                this.renderer?.mark_texture_dirty();
+        const arcball_rotate = (from_x, from_y, to_x, to_y, rect) => {
+            const scale = 2.0 / Math.min(rect.width, rect.height);
+            const v_from = project_to_sphere((from_x - rect.width / 2) * scale, -(from_y - rect.height / 2) * scale);
+            const v_to = project_to_sphere((to_x - rect.width / 2) * scale, -(to_y - rect.height / 2) * scale);
+            const axis = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.cross(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), v_from, v_to);
+            const angle = Math.acos(Math.min(1.0, gl_matrix__WEBPACK_IMPORTED_MODULE_3__.dot(v_from, v_to)));
+            if (gl_matrix__WEBPACK_IMPORTED_MODULE_3__.length(axis) > 1e-6) {
+                gl_matrix__WEBPACK_IMPORTED_MODULE_3__.normalize(axis, axis);
+                const delta = gl_matrix__WEBPACK_IMPORTED_MODULE_2__.setAxisAngle(gl_matrix__WEBPACK_IMPORTED_MODULE_2__.create(), axis, angle);
+                gl_matrix__WEBPACK_IMPORTED_MODULE_2__.multiply(this.rotation, delta, this.rotation);
+                gl_matrix__WEBPACK_IMPORTED_MODULE_2__.normalize(this.rotation, this.rotation);
                 this.is_dirty = true;
-                return;
             }
-            // Left button: start sketch stroke
-            this.path = new Path2D();
-            this.mirror_path = new Path2D();
-            texture_context.strokeStyle = 'black';
-            texture_context.fillStyle = this.pen_color;
-            texture_context.lineWidth = 1;
-            this.prev_coords = [coords[0], coords[1]];
-            const mirror_coords = mirror_coordinates(coords);
-            this.path.moveTo(coords[0], coords[1]);
-            this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1]);
-        });
-        model_canvas.addEventListener("pointerup", (event) => {
-            if (event.button === 2)
-                return;
-            // Left button: commit sketch stroke
-            event.preventDefault();
+        };
+        const commit_stroke = () => {
             if (this.path && this.mirror_path) {
                 texture_context.lineWidth = this.pen_radius;
                 texture_context.beginPath();
@@ -5826,35 +5802,112 @@ class App {
                 this.renderer?.mark_texture_dirty();
             }
             this.prev_coords = null;
+        };
+        model_canvas.addEventListener("pointerdown", (event) => {
+            model_canvas.setPointerCapture(event.pointerId);
+            this.active_pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            // Desktop right-click: rotation handled in pointermove
+            if (event.button === 2) {
+                event.preventDefault();
+                return;
+            }
+            // Second finger arriving: switch to rotation, cancel any active stroke
+            if (this.active_pointers.size >= 2) {
+                this.rotating = true;
+                this.path = null;
+                this.mirror_path = null;
+                this.prev_coords = null;
+                return;
+            }
+            // Coming out of a rotation gesture: wait for a fresh single-touch
+            if (this.rotating)
+                return;
+            const coords = pointer_event_to_coordinates(event);
+            if (!coords)
+                return;
+            if (this.active_tool === 'fill') {
+                const tw = texture_canvas.width;
+                const th = texture_canvas.height;
+                const replaced_color = texture_context.getImageData(coords[0], coords[1], 1, 1).data;
+                const parsed_fore_color = parse_RGBA(this.pen_color);
+                _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, coords[0], coords[1], tw, th);
+                const mx = tw - 1 - coords[1];
+                const my = th - 1 - coords[0];
+                _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, mx, my, tw, th);
+                this.renderer?.mark_texture_dirty();
+                this.is_dirty = true;
+                return;
+            }
+            this.path = new Path2D();
+            this.mirror_path = new Path2D();
+            texture_context.strokeStyle = 'black';
+            texture_context.fillStyle = this.pen_color;
+            texture_context.lineWidth = 1;
+            this.prev_coords = [coords[0], coords[1]];
+            const mirror_coords = mirror_coordinates(coords);
+            this.path.moveTo(coords[0], coords[1]);
+            this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1]);
+        });
+        const on_pointer_end = (event) => {
+            this.active_pointers.delete(event.pointerId);
+            if (this.active_pointers.size === 0)
+                this.rotating = false;
+            if (event.button === 2)
+                return;
+            commit_stroke();
+        };
+        model_canvas.addEventListener("pointerup", on_pointer_end);
+        // pointercancel fires on iOS when the system interrupts (e.g. notification)
+        model_canvas.addEventListener("pointercancel", (event) => {
+            this.active_pointers.delete(event.pointerId);
+            if (this.active_pointers.size === 0)
+                this.rotating = false;
+            commit_stroke();
         });
         model_canvas.addEventListener("pointermove", (event) => {
             event.preventDefault();
-            if (event.buttons & 2) {
-                // Right button held: rotate
+            // Two-finger rotation (multi-touch)
+            if (this.active_pointers.size >= 2 && this.active_pointers.has(event.pointerId)) {
                 const rect = model_canvas.getBoundingClientRect();
-                const scale = 2.0 / Math.min(rect.width, rect.height);
-                const cx = event.clientX - rect.left;
-                const cy = event.clientY - rect.top;
-                const v_from = project_to_sphere((cx - event.movementX - rect.width / 2) * scale, -(cy - event.movementY - rect.height / 2) * scale);
-                const v_to = project_to_sphere((cx - rect.width / 2) * scale, -(cy - rect.height / 2) * scale);
-                const axis = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.cross(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), v_from, v_to);
-                const angle = Math.acos(Math.min(1.0, gl_matrix__WEBPACK_IMPORTED_MODULE_3__.dot(v_from, v_to)));
-                if (gl_matrix__WEBPACK_IMPORTED_MODULE_3__.length(axis) > 1e-6) {
-                    gl_matrix__WEBPACK_IMPORTED_MODULE_3__.normalize(axis, axis);
-                    const delta = gl_matrix__WEBPACK_IMPORTED_MODULE_2__.setAxisAngle(gl_matrix__WEBPACK_IMPORTED_MODULE_2__.create(), axis, angle);
-                    gl_matrix__WEBPACK_IMPORTED_MODULE_2__.multiply(this.rotation, delta, this.rotation);
-                    gl_matrix__WEBPACK_IMPORTED_MODULE_2__.normalize(this.rotation, this.rotation);
-                    this.is_dirty = true;
+                let sx = 0, sy = 0;
+                for (const pt of this.active_pointers.values()) {
+                    sx += pt.x;
+                    sy += pt.y;
                 }
+                const n = this.active_pointers.size;
+                const bx = sx / n - rect.left, by = sy / n - rect.top;
+                this.active_pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+                sx = 0;
+                sy = 0;
+                for (const pt of this.active_pointers.values()) {
+                    sx += pt.x;
+                    sy += pt.y;
+                }
+                const ax = sx / n - rect.left, ay = sy / n - rect.top;
+                arcball_rotate(bx, by, ax, ay, rect);
                 return;
             }
+            // Update stored position for single pointer
+            if (this.active_pointers.has(event.pointerId)) {
+                this.active_pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            }
+            // Desktop right-click rotation (single pointer)
+            if (event.buttons & 2) {
+                const rect = model_canvas.getBoundingClientRect();
+                const cx = event.clientX - rect.left;
+                const cy = event.clientY - rect.top;
+                arcball_rotate(cx - event.movementX, cy - event.movementY, cx, cy, rect);
+                return;
+            }
+            // Block drawing if we're still coming out of a rotation gesture
+            if (this.rotating)
+                return;
             if (!(event.buttons & 1))
                 return;
             const coords = pointer_event_to_coordinates(event);
             if (!coords)
                 return;
             const mirror_coords = mirror_coordinates(coords);
-            this.reset_opacity_to_opaque();
             if (this.prev_coords && this.path && this.mirror_path) {
                 if (dist2(coords, this.prev_coords) > 4) {
                     this.path.lineTo(coords[0], coords[1]);
@@ -6039,6 +6092,11 @@ __webpack_require__.r(__webpack_exports__);
 class WebglRenderer {
     constructor(main_canvas, texture_canvas) {
         this.texture_dirty = true;
+        // Geometry caches — avoid re-creating Float32Arrays + GPU uploads every frame
+        this.cached_model = null;
+        this.cached_model_geo = null;
+        this.cached_mirrors_verts = null;
+        this.cached_mirrors_geo = null;
         this.texture_canvas = texture_canvas;
         this.renderer = new three__WEBPACK_IMPORTED_MODULE_0__.WebGLRenderer({ canvas: main_canvas, alpha: true });
         this.renderer.autoClear = false;
@@ -6109,13 +6167,14 @@ class WebglRenderer {
     end_frame() {
         // Three.js manages GL state cleanup internally
     }
-    render_pass(geometry, material) {
+    render_pass(geometry, material, owned = true) {
         const mesh = new three__WEBPACK_IMPORTED_MODULE_0__.Mesh(geometry, material);
         mesh.frustumCulled = false;
         this.scene.clear();
         this.scene.add(mesh);
         this.renderer.render(this.scene, this.camera);
-        geometry.dispose();
+        if (owned)
+            geometry.dispose();
     }
     apply_uniforms(material, uniforms) {
         for (const [key, entry] of Object.entries(uniforms)) {
@@ -6126,11 +6185,21 @@ class WebglRenderer {
     }
     draw_model(model, uniforms) {
         this.apply_uniforms(this.main_material, uniforms);
-        this.render_pass((0,_webgl_utils__WEBPACK_IMPORTED_MODULE_2__.model_to_geometry)(model), this.main_material);
+        if (this.cached_model !== model) {
+            this.cached_model_geo?.dispose();
+            this.cached_model_geo = (0,_webgl_utils__WEBPACK_IMPORTED_MODULE_2__.model_to_geometry)(model);
+            this.cached_model = model;
+        }
+        this.render_pass(this.cached_model_geo, this.main_material, false);
     }
     draw_mirrors(model, uniforms) {
         this.apply_uniforms(this.mirror_material, uniforms);
-        this.render_pass((0,_webgl_utils__WEBPACK_IMPORTED_MODULE_2__.model_to_geometry)(model), this.mirror_material);
+        if (this.cached_mirrors_verts !== model.vertices) {
+            this.cached_mirrors_geo?.dispose();
+            this.cached_mirrors_geo = (0,_webgl_utils__WEBPACK_IMPORTED_MODULE_2__.model_to_geometry)(model);
+            this.cached_mirrors_verts = model.vertices;
+        }
+        this.render_pass(this.cached_mirrors_geo, this.mirror_material, false);
     }
     draw_overlay(model, uniforms) {
         this.apply_uniforms(this.overlay_material, uniforms);

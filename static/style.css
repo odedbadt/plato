@@ -10,6 +10,9 @@ html, body {
   overflow: hidden;
   background-color: black;
   font-family: monospace;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Main 3D canvas - square */
@@ -41,8 +44,8 @@ html, body {
 /* Toggle button */
 #controls-toggle {
   position: fixed;
-  top: 16px;
-  right: 16px;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
   z-index: 1000;
   width: 44px;
   height: 44px;
@@ -80,8 +83,8 @@ html, body {
 /* Controls panel */
 #controls-panel {
   position: fixed;
-  top: 124px;
-  right: 16px;
+  top: max(124px, calc(env(safe-area-inset-top) + 108px));
+  right: max(16px, env(safe-area-inset-right));
   z-index: 999;
   background: rgba(30,30,30,0.95);
   border-radius: 12px;
