@@ -10,7 +10,8 @@ import { Mat3, Vec3 } from './linalg';
 import {
     GeneratedModel, MeshOptions,
     place_mirrors, perpendicular_to_mirror_matrix,
-    mirror_matrices_to_group_transformations, transformations_to_mesh
+    mirror_matrices_to_group_transformations, transformations_to_mesh,
+    transformations_to_edges
 } from './geometry';
 
 export type SymmetryFamily = 'icosahedral' | 'octahedral' | 'tetrahedral';
@@ -103,4 +104,13 @@ export function generate_model(model_name: string): GeneratedModel {
     if (!spec) throw new Error(`Unknown generated model: ${model_name}`);
     const { mirrors, transformations } = get_family(spec.family);
     return transformations_to_mesh(mirrors, transformations, spec);
+}
+
+// The solid's real edges, straight from the group rather than recovered from
+// the mesh afterwards.
+export function generate_edges(model_name: string) {
+    const spec = MODEL_SPECS[model_name];
+    if (!spec) throw new Error(`Unknown generated model: ${model_name}`);
+    const { mirrors, transformations } = get_family(spec.family);
+    return transformations_to_edges(mirrors, transformations, spec);
 }

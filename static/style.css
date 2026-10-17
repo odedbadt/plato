@@ -84,6 +84,76 @@ html, body {
 
 #clear-btn       { top: calc(max(16px, env(safe-area-inset-top)) + 54px); }
 #model-picker-btn { top: calc(max(16px, env(safe-area-inset-top)) + 108px); }
+#wireframe-btn   { top: calc(max(16px, env(safe-area-inset-top)) + 162px); }
+.floating-btn.active { background: rgba(255,255,255,0.55); }
+
+/* Paper mode: the wireframe reads as ink on a page, so the canvas ground goes
+   light while it is on. The buttons sit on that ground, so they darken to stay
+   legible — their glyphs stay white rather than being recoloured. */
+body.paper {
+  background-color: #f4f3ef;
+}
+
+/* The canvas frame is a light hairline meant for the dark ground; invert it
+   so it stays a hairline on paper instead of a white gap. */
+body.paper #mainCanvas {
+  border-color: rgba(0,0,0,0.18);
+}
+
+body.paper #controls-toggle,
+body.paper .floating-btn {
+  background: rgba(0,0,0,0.45);
+}
+
+body.paper #controls-toggle:hover,
+body.paper .floating-btn:hover {
+  background: rgba(0,0,0,0.62);
+}
+
+body.paper .floating-btn.active {
+  background: rgba(0,0,0,0.78);
+}
+
+/* Wireframe controls */
+
+/* The options below the Wireframe checkbox only mean anything while it is on. */
+#wireframe-options .wf-sub {
+  transition: opacity 0.15s ease;
+}
+
+#wireframe-options.off .wf-sub {
+  opacity: 0.35;
+  pointer-events: none;
+}
+#wireframe-options select {
+  width: 100%;
+  padding: 6px;
+  border-radius: 6px;
+  border: none;
+  background: #444;
+  color: white;
+  font-family: monospace;
+  font-size: 13px;
+}
+
+#wireframe-options .slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#wireframe-options .slider-row label {
+  flex: 0 0 6.5em;
+  margin-left: 0;
+  white-space: nowrap;
+}
+
+#wireframe-options .slider-row input[type=range] {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 18px;
+  margin: 0;
+}
 
 /* Model picker modal */
 #model-picker-overlay {
@@ -255,17 +325,20 @@ legend {
   padding: 0 8px;
 }
 
-#rendering-options label {
+#rendering-options label,
+#wireframe-options label {
   color: #ccc;
   font-size: 13px;
   margin-left: 6px;
 }
 
-#rendering-options > div {
+#rendering-options > div,
+#wireframe-options > div {
   margin: 8px 0;
 }
 
-#rendering-options input {
+#rendering-options input,
+#wireframe-options input {
   accent-color: #448AFF;
 }
 
@@ -330,13 +403,21 @@ legend {
     font-size: 16px;
   }
 
-  #rendering-options label {
+  #rendering-options label,
+  #wireframe-options label {
     font-size: 16px;
   }
 
-  #rendering-options input {
+  #rendering-options input[type=checkbox],
+  #rendering-options input[type=radio],
+  #wireframe-options input[type=checkbox] {
     width: 20px;
     height: 20px;
+  }
+
+  #wireframe-options select {
+    padding: 10px;
+    font-size: 16px;
   }
 
   fieldset {

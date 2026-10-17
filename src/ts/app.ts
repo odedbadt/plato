@@ -1,6 +1,6 @@
 import * as Glsl from './glsl'
 import * as webgl_utils from './webgl_utils'
-import { WebglRenderer } from './webgl_renderer'
+import { WebglRenderer, WireframeOptions, DEFAULT_WIREFRAME_OPTIONS } from './webgl_renderer'
 import { generate_model, is_generated_model, GENERATED_MODEL_NAMES, SELECTABLE_MODEL_NAMES } from './symmetry'
 function parse_RGBA(color: string): [number, number, number, number] {
   const canvas = document.createElement('canvas');
@@ -98,6 +98,9 @@ export class App {
   prev_mirror_coords: number[] | null = null;
   texture_canvas: HTMLCanvasElement | null = null;
   renderer: WebglRenderer | null = null;
+  // Which model `this.model` is, so the wireframe can ask the generator for
+  // its edges instead of measuring them off the mesh.
+  model_name: string | null = null;
   // Multi-touch state
   active_pointers: Map<number, { x: number, y: number }> = new Map();
   rotating: boolean = false;
@@ -194,8 +197,12 @@ export class App {
         clear_btn?.addEventListener('click', () => _this.clear());
         // const cache_clear_btn = document.getElementById('clear-cache');
         // cache_clear_btn.addEventListener('click', () => localStorage.clear());
-        for (const id of ['model', 'all-mirrors', 'no-mirrors', 'generating-mirrors']) {
+        for (const id of ['model', 'all-mirrors', 'no-mirrors', 'generating-mirrors',
+                          'wireframe', 'wireframe-mode', 'wf-hide-back']) {
           document.getElementById(id)?.addEventListener('change', () => { _this.is_dirty = true; })
+        }
+        for (const id of ['wf-weight']) {
+          document.getElementById(id)?.addEventListener('input', () => { _this.is_dirty = true; })
         }
         _this.is_dirty = true;
         _this.init_animation_loop();
@@ -256,7 +263,7 @@ export class App {
       shape_name_element.innerHTML = 'Loading...';
     }
     if (this.spinner_model) {
-      this.set_model(this.spinner_model);
+      this.set_model(this.spinner_model, 'spinner');
     }
     //this.set_spinning_speed(.035);
     const _this = this
@@ -265,7 +272,7 @@ export class App {
         if (!is_generated_model(model_name)) {
           _this.cache.setItem(model_name, JSON.stringify(model));
         }
-        _this.set_model(model)
+        _this.set_model(model, model_name)
         ready_callback()
       })
   }
@@ -274,8 +281,9 @@ export class App {
     this.is_spinning = this.spinning_speed > 0
     //this.spin_and_draw();
   }
-  set_model(model: any) {
+  set_model(model: any, model_name: string | null = null) {
     this.model = model;
+    this.model_name = model_name;
     this.path = null;
     this.mirror_path = null;
 
@@ -387,6 +395,26 @@ export class App {
 
     // Model picker open button
     document.getElementById('model-picker-btn')?.addEventListener('click', () => this.open_model_picker());
+
+    // Floating wireframe toggle, mirroring the checkbox in the controls panel
+    const wireframe_btn = document.getElementById('wireframe-btn');
+    const wireframe_checkbox = document.getElementById('wireframe') as HTMLInputElement;
+    const sync_wireframe_btn = () => {
+      const on = !!wireframe_checkbox?.checked;
+      wireframe_btn?.classList.toggle('active', on);
+      // Ink on paper: the ground goes light while the wireframe is up.
+      document.body.classList.toggle('paper', on);
+      // The style, weight and hide-back controls do nothing while it is off.
+      document.getElementById('wireframe-options')?.classList.toggle('off', !on);
+    };
+    wireframe_btn?.addEventListener('click', () => {
+      if (!wireframe_checkbox) return;
+      wireframe_checkbox.checked = !wireframe_checkbox.checked;
+      sync_wireframe_btn();
+      this.is_dirty = true;
+    });
+    wireframe_checkbox?.addEventListener('change', sync_wireframe_btn);
+    sync_wireframe_btn();
 
     // Close modal when clicking the backdrop
     const overlay = document.getElementById('model-picker-overlay');
@@ -735,6 +763,36 @@ export class App {
     });
 
   }
+  // Translate the wireframe controls into renderer options. The panel exposes
+  // a style, a single weight, and whether to hide what is round the back; the
+  // rest of the doc's parameters keep their recommended values.
+  wireframe_options(): WireframeOptions {
+    const style = (document.getElementById('wireframe-mode') as HTMLSelectElement)?.value
+      || 'depth-halo';
+    const weight_input = document.getElementById('wf-weight') as HTMLInputElement;
+    const parsed = weight_input ? parseFloat(weight_input.value) : NaN;
+    // One knob scales the whole ink range, keeping the near:far ratio — and so
+    // the strength of the depth cue — fixed while the drawing gets lighter or
+    // heavier overall.
+    const weight = Number.isFinite(parsed) ? parsed : 1;
+
+    const halo = style === 'depth-halo';
+    const halo_gain = 1.5;   // the doc's middle of the 1-2 range that reads best
+
+    return {
+      ...DEFAULT_WIREFRAME_OPTIONS,
+      // Paper mode means the ground is always light, so the ink is always dark.
+      color: [0.09, 0.10, 0.12],
+      flat: style === 'uniform',
+      halo,
+      hide_back: !!(document.getElementById('wf-hide-back') as HTMLInputElement)?.checked,
+      w_min: 0.25 * weight,
+      w_max: 3.0 * weight,
+      halo_gain: halo ? halo_gain : 0,
+      halo_px: 0.5 + 10 * halo_gain,
+    };
+  }
+
   draw_model() {
     if (!this.is_dirty || !this.renderer) {
       return;
@@ -754,6 +812,20 @@ export class App {
     const modelCheckbox = document.getElementById('model') as HTMLInputElement;
     if (modelCheckbox?.checked && this.model) {
       this.renderer.draw_model(this.model, uniforms);
+    }
+
+    // Draw wireframe. After the model so solid faces hide the edges behind them,
+    // before the mirrors so the mirror planes don't cull half the edges (the
+    // halo prepass does leave faint hairlines on the planes in return).
+    const wireframeCheckbox = document.getElementById('wireframe') as HTMLInputElement;
+    if (wireframeCheckbox?.checked && this.model) {
+      const wireframe_options = this.wireframe_options();
+      // With the solid hidden, its depth alone still removes the back edges.
+      if (wireframe_options.hide_back && !modelCheckbox?.checked) {
+        this.renderer.draw_model_depth_only(this.model, uniforms);
+      }
+      this.renderer.draw_wireframe(
+        this.model, uniforms, wireframe_options, this.model_name ?? undefined);
     }
 
     // Draw mirrors

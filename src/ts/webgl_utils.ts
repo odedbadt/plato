@@ -108,14 +108,26 @@ export function pick_uv(
     return best_uv;
 }
 
+// Camera constants. The wireframe pass needs these to turn a fragment's view
+// depth back into a window depth, and to size the ink ramp to the model.
+export const CAMERA_EYE: [number, number, number] = [0, -.1, 5];
+export const CAMERA_TARGET: [number, number, number] = [0, -.1, 0];
+export const CAMERA_DISTANCE = Math.hypot(
+    CAMERA_EYE[0] - CAMERA_TARGET[0],
+    CAMERA_EYE[1] - CAMERA_TARGET[1],
+    CAMERA_EYE[2] - CAMERA_TARGET[2]);
+export const CLIP_NEAR = 1.0;
+export const CLIP_FAR = 10.0;
+export const FOV_Y = Math.PI * 0.15;
+
 export function matrix_uniforms(rotation: glMatrix.quat): Uniforms {
     const rotation_matrix_4x4 = glMatrix.mat4.create();
     glMatrix.mat4.fromQuat(rotation_matrix_4x4, rotation);
 
     const viewMatrix = glMatrix.mat4.create();
-    glMatrix.mat4.lookAt(viewMatrix, [0, -.1, 5], [0, -.1, 0], [0, 1, 0]);
+    glMatrix.mat4.lookAt(viewMatrix, CAMERA_EYE, CAMERA_TARGET, [0, 1, 0]);
     const projectionMatrix = glMatrix.mat4.create();
-    glMatrix.mat4.perspective(projectionMatrix, Math.PI * 0.15, 1, 1, 10.0);
+    glMatrix.mat4.perspective(projectionMatrix, FOV_Y, 1, CLIP_NEAR, CLIP_FAR);
 
     glMatrix.mat4.multiply(projectionMatrix, projectionMatrix, viewMatrix)
 

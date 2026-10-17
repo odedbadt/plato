@@ -194,6 +194,112 @@ export function build_mirror_mesh(
     return { mesh, normals };
 }
 
+// The fundamental triangle, plus which mirror plane each of its edges lies in.
+//
+// v0 = m1 x m2 is perpendicular to the normals of mirrors 1 and 2, so it lies
+// *in* both of those planes; likewise v1 in planes 2 and 0, and v2 in planes 1
+// and 0. Each edge therefore lies in the one plane its two endpoints share.
+export type FundamentalTriangle = {
+    v0: Vec3, v1: Vec3, v2: Vec3,
+    // Unnormalised, exactly as the mesh builder wants it.
+    face_normal: Vec3,
+    // Mirror index for edges (v0,v1), (v1,v2), (v2,v0).
+    edge_mirrors: [number, number, number]
+};
+
+export function fundamental_triangle(
+    mirrors: Vec3[], options: MeshOptions = {}
+): FundamentalTriangle {
+    const { dual = false, stellated = false, rhombic = false, factor = 1.0 } = options;
+    const indices = dual ? [0, 2, 1] : [0, 1, 2];
+
+    const m1xm2 = normalize(cross(mirrors[indices[1]], mirrors[indices[2]]));
+    const m2xm0 = normalize(cross(mirrors[indices[2]], mirrors[indices[0]]));
+    // Quirk: reversed relative to its name — cross(m1, m0), not cross(m0, m1).
+    // This sets the triangle winding; flipping it inverts every face.
+    const m0xm1 = normalize(cross(mirrors[indices[1]], mirrors[indices[0]]));
+
+    let v0 = m1xm2;
+    let v1 = scale(m2xm0, 1 / dot(m2xm0, m1xm2));
+    // Quirk: v2 multiplies by the dot product where v1 divides; only the
+    // rhombic variant divides in both.
+    let v2 = rhombic
+        ? scale(m0xm1, 1 / dot(m0xm1, m1xm2))
+        : scale(m0xm1, dot(m0xm1, m1xm2));
+    if (stellated) v2 = scale(v2, 2);
+
+    const max_norm = Math.max(norm(v0), norm(v1), norm(v2));
+    v0 = scale(v0, factor / max_norm);
+    v1 = scale(v1, factor / max_norm);
+    v2 = scale(v2, factor / max_norm);
+
+    // Flat per-face normal, left unnormalised exactly as in the original.
+    const face_normal = cross(subtract(v0, v1), subtract(v0, v2));
+
+    return {
+        v0, v1, v2, face_normal,
+        edge_mirrors: [indices[2], indices[0], indices[1]]
+    };
+}
+
+// Reflecting the fundamental triangle across the plane holding one of its
+// edges produces the neighbour sharing that edge. The two are coplanar — so
+// the edge is interior to a face rather than a crease — exactly when the
+// mirror is perpendicular to the face, i.e. when the face normal is
+// perpendicular to the mirror normal.
+//
+// This is what makes the generated models easier to wireframe than the meshes
+// they produce: the question is settled by three dot products on one triangle,
+// with no dihedral-angle threshold and no tolerance for the mesh's rounding.
+// The two cases are not close — creases land around 0.3 to 0.8, face interiors
+// at 1e-16 — and which slot is which varies by solid, so it cannot be hardcoded
+// (the stellated octahedron creases along a different edge than the cube).
+const CREASE_EPSILON = 1e-6;
+
+// Edge endpoints keep this much precision regardless of the mesh's own
+// rounding; the wireframe's depth bias covers the sub-thousandth offset.
+const EDGE_DECIMALS = 6;
+
+export function crease_slots(triangle: FundamentalTriangle, mirrors: Vec3[]): boolean[] {
+    const n = normalize(triangle.face_normal);
+    return triangle.edge_mirrors.map(index =>
+        Math.abs(dot(n, normalize(mirrors[index]))) > CREASE_EPSILON);
+}
+
+// Sweeps the fundamental triangle's crease edges through the whole group,
+// yielding every real edge of the solid and nothing else. Endpoints are
+// rounded like the mesh so the wireframe sits exactly on the surface.
+export function transformations_to_edges(
+    mirrors: Vec3[], transformations: Mat3[], options: MeshOptions = {}
+): { starts: number[], ends: number[], edge_mirrors: number[] } {
+    // Round no coarser than the mesh, but not as coarse as the spinner's 2
+    // decimals: at factor 0.25 that is ~4% of the model, enough to fuse
+    // distinct corners when the edges are welded.
+    const decimals = Math.max(options.decimals ?? DEFAULT_DECIMALS, EDGE_DECIMALS);
+    const triangle = fundamental_triangle(mirrors, options);
+    const creases = crease_slots(triangle, mirrors);
+    const corners = [triangle.v0, triangle.v1, triangle.v2];
+
+    const starts: number[] = [];
+    const ends: number[] = [];
+    const edge_mirrors: number[] = [];
+    const round3 = (v: Vec3): Vec3 => [
+        round_to(v[0], decimals), round_to(v[1], decimals), round_to(v[2], decimals)
+    ];
+
+    for (const transformation of transformations) {
+        for (let slot = 0; slot < 3; slot++) {
+            if (!creases[slot]) continue;
+            const a = round3(mat_apply(transformation, corners[slot]));
+            const b = round3(mat_apply(transformation, corners[(slot + 1) % 3]));
+            starts.push(...a);
+            ends.push(...b);
+            edge_mirrors.push(triangle.edge_mirrors[slot]);
+        }
+    }
+    return { starts, ends, edge_mirrors };
+}
+
 export type MeshOptions = {
     dual?: boolean,
     stellated?: boolean,
@@ -227,30 +333,7 @@ export function transformations_to_mesh(
     } = options;
 
     const t = transformations.length;
-    const indices = dual ? [0, 2, 1] : [0, 1, 2];
-
-    const m1xm2 = normalize(cross(mirrors[indices[1]], mirrors[indices[2]]));
-    const m2xm0 = normalize(cross(mirrors[indices[2]], mirrors[indices[0]]));
-    // Quirk: reversed relative to its name — cross(m1, m0), not cross(m0, m1).
-    // This sets the triangle winding; flipping it inverts every face.
-    const m0xm1 = normalize(cross(mirrors[indices[1]], mirrors[indices[0]]));
-
-    let v0 = m1xm2;
-    let v1 = scale(m2xm0, 1 / dot(m2xm0, m1xm2));
-    // Quirk: v2 multiplies by the dot product where v1 divides; only the
-    // rhombic variant divides in both.
-    let v2 = rhombic
-        ? scale(m0xm1, 1 / dot(m0xm1, m1xm2))
-        : scale(m0xm1, dot(m0xm1, m1xm2));
-    if (stellated) v2 = scale(v2, 2);
-
-    const max_norm = Math.max(norm(v0), norm(v1), norm(v2));
-    v0 = scale(v0, factor / max_norm);
-    v1 = scale(v1, factor / max_norm);
-    v2 = scale(v2, factor / max_norm);
-
-    // Flat per-face normal, left unnormalised exactly as in the original.
-    const face_normal = cross(subtract(v0, v1), subtract(v0, v2));
+    const { v0, v1, v2, face_normal } = fundamental_triangle(mirrors, options);
 
     const vertices: number[] = [];
     const normals: number[] = [];
