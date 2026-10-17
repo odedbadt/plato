@@ -29,8 +29,50 @@ const NORMAL_DECIMALS = 9; // distinct_normals rounds harder than everything els
 // UV corners of each fundamental triangle, as shipped in the JSON models.
 const TRIANGLE_UVS = [0, 0, 0, 1, 1, 0];
 
+// Which geometry a Coxeter triple's triangle lives in, from the determinant of
+// its Gram matrix: G_ii = 1, G_ij = -cos(pi / n_ij).
+//
+// This is the exact, total test, and the only one to trust. The `acos` in
+// place_mirrors() below is not a geometry test: it returns NaN for some
+// non-spherical triples — (6,3,2), (4,4,2), (7,3,2) — but finite nonsense for
+// others, with (5,4,3), (4,4,4) and (7,7,7) all producing plausible-looking
+// Euclidean normals and then running the closure away to nothing. The
+// equivalent angle-sum statement is that 1/x + 1/y + 1/z greater than 1 is
+// spherical, equal is Euclidean and less is hyperbolic.
+export type TriangleGeometry = 'spherical' | 'euclidean' | 'hyperbolic';
+
+export function gram_determinant(x: number, y: number, z: number): number {
+    const a = -Math.cos(Math.PI / x); // between mirrors 0 and 1
+    const b = -Math.cos(Math.PI / y); // between mirrors 0 and 2
+    const c = -Math.cos(Math.PI / z); // between mirrors 1 and 2
+    return (1 - c * c) - a * (a - c * b) + b * (a * c - b);
+}
+
+const FLAT_EPSILON = 1e-9;
+
+export function classify_triple(x: number, y: number, z: number): TriangleGeometry {
+    const d = gram_determinant(x, y, z);
+    if (Math.abs(d) < FLAT_EPSILON) return 'euclidean';
+    return d > 0 ? 'spherical' : 'hyperbolic';
+}
+
+// A triple only describes a kaleidoscope at all if every angle is pi/n for a
+// real n of at least 2.
+export function triple_is_valid(x: number, y: number, z: number): boolean {
+    return [x, y, z].every(n => Number.isFinite(n) && n >= 2);
+}
+
 // Unit normals of three mirror planes meeting at angles pi/x, pi/y, pi/z.
+//
+// Spherical triples only: anything else has no such arrangement in R^3, and
+// letting one through here is what used to hang the tab.
 export function place_mirrors(x: number, y: number, z: number): Vec3[] {
+    const geometry = classify_triple(x, y, z);
+    if (geometry !== 'spherical') {
+        throw new Error(
+            `(${x},${y},${z}) is ${geometry}, not spherical: its group is infinite. ` +
+            `See symmetry/hyperbolic.ts.`);
+    }
     const a = Math.PI / x; // between mirrors 0 and 1
     const b = Math.PI / y; // between mirrors 0 and 2
     const c = Math.PI / z; // between mirrors 1 and 2
@@ -72,6 +114,14 @@ export function fuzzy_unique(matrices: Mat3[], threshold = 10e-3): Mat3[] {
     return kept;
 }
 
+// Largest group this will enumerate. The biggest one it is ever asked for is
+// icosahedral at 120, so this is pure containment: a triple that is not
+// spherical has an infinite group, and without a ceiling the loop below simply
+// grows — (4,4,4) reaches 6718 matrices in 682 ms and never stops, taking the
+// tab with it. place_mirrors() now refuses such triples outright, and this is
+// the second line in case something reaches here another way.
+const MAX_GROUP_ORDER = 1000;
+
 // Closure under left-multiplication by the mirrors, enumerating the group.
 export function mirror_matrices_to_group_transformations(mirror_matrices: Mat3[]): Mat3[] {
     let transformations: Mat3[] = [IDENTITY3.slice()];
@@ -85,6 +135,11 @@ export function mirror_matrices_to_group_transformations(mirror_matrices: Mat3[]
         }
         const next = fuzzy_unique(transformations.concat(applied));
         if (next.length === transformations.length) return next;
+        if (next.length > MAX_GROUP_ORDER) {
+            throw new Error(
+                `reflection group exceeded ${MAX_GROUP_ORDER} elements; ` +
+                `the mirrors do not generate a finite group`);
+        }
         transformations = next;
     }
     return transformations;

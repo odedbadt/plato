@@ -113,6 +113,38 @@
     </div>
     <div id="v-div-1">
       <div id="model-select-container"></div>
+      <fieldset id="symmetry-options">
+        <legend>Mirror angles:</legend>
+        <div id="triple-row">
+          <span class="triple-pi">&#960;/</span>
+          <input type="number" id="triple-x" min="2" max="24" step="1" value="5">
+          <input type="number" id="triple-y" min="2" max="24" step="1" value="3">
+          <input type="number" id="triple-z" min="2" max="24" step="1" value="2">
+        </div>
+        <div id="triple-note"></div>
+      </fieldset>
+      <fieldset id="plane-options" style="display:none">
+        <legend>Plane:</legend>
+        <div class="hyperbolic-only">
+          <select id="hyper-projection"></select>
+        </div>
+        <div class="slider-row hyperbolic-only">
+          <label for="hyper-cutoff">Depth</label>
+          <input type="range" id="hyper-cutoff" min="0.8" max="0.995" step="0.005" value="0.95">
+        </div>
+        <div class="slider-row euclidean-only">
+          <label for="euclid-scale">Cell size</label>
+          <input type="range" id="euclid-scale" min="0.05" max="0.8" step="0.01" value="0.22">
+        </div>
+        <div>
+          <input type="checkbox" id="plane-checker" name="plane-checker" checked>
+          <label for="plane-checker">Checker the cells</label>
+        </div>
+        <div>
+          <button type="button" id="plane-recentre">Recentre</button>
+        </div>
+        <div id="plane-status"></div>
+      </fieldset>
       <fieldset id="rendering-options">
         <legend>Rendering options:</legend>
         <div>
@@ -143,23 +175,23 @@
           <div id="shape-seed-hint">Corners are the regular solids, edges the
             truncations, the middle the omnitruncated one.</div>
         </div>
-        <div class="slider-row classic-sub">
+        <div class="slider-row classic-sub spherical-only">
           <label for="shape-stellation">Stellation</label>
           <input type="range" id="shape-stellation" min="0.2" max="3" step="0.01" value="1">
         </div>
-        <div class="slider-row">
+        <div class="slider-row spherical-only">
           <label for="shape-size">Size</label>
           <input type="range" id="shape-size" min="0.3" max="1.6" step="0.01" value="1">
         </div>
-        <div class="slider-row">
+        <div class="slider-row spherical-only">
           <label for="shape-mirror-size">Mirror size</label>
           <input type="range" id="shape-mirror-size" min="0.3" max="1.6" step="0.01" value="1">
         </div>
-        <div class="classic-sub">
+        <div class="classic-sub spherical-only">
           <input type="checkbox" id="shape-dual" name="shape-dual" value="shape-dual">
           <label for="shape-dual">Dual</label>
         </div>
-        <div class="classic-sub">
+        <div class="classic-sub spherical-only">
           <input type="checkbox" id="shape-rhombic" name="shape-rhombic" value="shape-rhombic">
           <label for="shape-rhombic">Rhombic</label>
         </div>

@@ -17,7 +17,10 @@ import { wythoff_mesh, wythoff_edges } from './wythoff';
 
 export type SymmetryFamily = 'icosahedral' | 'octahedral' | 'tetrahedral';
 
-const FAMILY_ANGLES: Record<SymmetryFamily, [number, number, number]> = {
+// A Coxeter triple: mirrors at angles pi/x, pi/y, pi/z.
+export type Angles = [number, number, number];
+
+export const FAMILY_ANGLES: Record<SymmetryFamily, Angles> = {
     icosahedral: [5, 3, 2], // group order 120
     octahedral: [4, 3, 2],  // group order 48
     tetrahedral: [3, 3, 2]  // group order 24
@@ -27,14 +30,24 @@ const FAMILY_ANGLES: Record<SymmetryFamily, [number, number, number]> = {
 // in corner order. Corner k is where mirrors k+1 and k+2 meet; place_mirrors
 // separates mirrors 0 and 1 by pi/x, 0 and 2 by pi/y, and 1 and 2 by pi/z, so
 // corner 0 turns z-fold, corner 1 y-fold and corner 2 x-fold.
-export function corner_orders(family: SymmetryFamily): [number, number, number] {
-    const [x, y, z] = FAMILY_ANGLES[family];
+export function corner_orders(angles: Angles): [number, number, number] {
+    const [x, y, z] = angles;
     return [z, y, x];
 }
 
 export type ModelSpec = MeshOptions & {
-    family: SymmetryFamily
+    family: SymmetryFamily,
+    // Overrides the family's own triple. The three named families are the
+    // ones worth naming, not the only ones that work: any triple with
+    // 1/x + 1/y + 1/z > 1 generates a finite group, and the generator never
+    // cared which it was handed. Triples that are not spherical belong to
+    // symmetry/hyperbolic.ts, and place_mirrors() refuses them.
+    angles?: Angles
 };
+
+export function spec_angles(spec: ModelSpec): Angles {
+    return spec.angles ?? FAMILY_ANGLES[spec.family];
+}
 
 export const MODEL_SPECS: Record<string, ModelSpec> = {
     cube: { family: 'octahedral' },
@@ -91,6 +104,11 @@ export function family_label(family: SymmetryFamily): string {
     return `${family[0].toUpperCase()}${family.slice(1)} (${x},${y},${z})`;
 }
 
+// "(5,5,2)" — a triple with no name of its own.
+export function angles_label(angles: Angles): string {
+    return `(${angles[0]},${angles[1]},${angles[2]})`;
+}
+
 export function family_order(family: SymmetryFamily): number {
     return get_family(family).transformations.length;
 }
@@ -98,18 +116,24 @@ export function family_order(family: SymmetryFamily): number {
 type Family = { mirrors: Vec3[], transformations: Mat3[] };
 
 // Enumerating a reflection group takes long enough to be worth doing once.
-const family_cache = new Map<SymmetryFamily, Family>();
+// Keyed on the triple rather than the family name, since the triple is what
+// the group actually depends on.
+const group_cache = new Map<string, Family>();
 
-export function get_family(name: SymmetryFamily): Family {
-    const cached = family_cache.get(name);
+export function get_group(angles: Angles): Family {
+    const key = angles_label(angles);
+    const cached = group_cache.get(key);
     if (cached) return cached;
-    const [x, y, z] = FAMILY_ANGLES[name];
-    const mirrors = place_mirrors(x, y, z);
+    const mirrors = place_mirrors(angles[0], angles[1], angles[2]);
     const transformations = mirror_matrices_to_group_transformations(
         mirrors.map(perpendicular_to_mirror_matrix));
-    const family = { mirrors, transformations };
-    family_cache.set(name, family);
-    return family;
+    const group = { mirrors, transformations };
+    group_cache.set(key, group);
+    return group;
+}
+
+export function get_family(name: SymmetryFamily): Family {
+    return get_group(FAMILY_ANGLES[name]);
 }
 
 export function is_generated_model(model_name: string): boolean {
@@ -133,14 +157,14 @@ function spec_of(model_name: string): ModelSpec {
 // by family alone, so a spec edited at runtime generates just as well as a
 // registered one. That is what the shape controls ride on.
 export function generate_model_from_spec(spec: ModelSpec): GeneratedModel {
-    const { mirrors, transformations } = get_family(spec.family);
+    const { mirrors, transformations } = get_group(spec_angles(spec));
     return spec.seed
         ? wythoff_mesh(mirrors, transformations, spec)
         : transformations_to_mesh(mirrors, transformations, spec);
 }
 
 export function generate_edges_from_spec(spec: ModelSpec): SweptEdges {
-    const { mirrors, transformations } = get_family(spec.family);
+    const { mirrors, transformations } = get_group(spec_angles(spec));
     return spec.seed
         ? wythoff_edges(mirrors, transformations, spec)
         : transformations_to_edges(mirrors, transformations, spec);

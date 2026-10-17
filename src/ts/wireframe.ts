@@ -30,15 +30,20 @@ export type EdgeSet = {
   radius: number,
 };
 
-// Where a model's edges are asked for: a registered model's name, or a spec
-// the shape controls have edited.
-export type EdgeSource = string | ModelSpec;
+// Where a model's edges are asked for: a registered model's name, a spec the
+// shape controls have edited, or the edges themselves — which is how the
+// hyperbolic tilings hand theirs over, having had to build them alongside the
+// mesh anyway.
+export type SweptEdges = { starts: number[], ends: number[] };
+export type EdgeSource = string | ModelSpec | SweptEdges;
 
 export function extract_edges(source?: EdgeSource): EdgeSet {
     if (typeof source === 'string') {
         if (is_generated_model(source)) {
             return edges_from_symmetry(generate_edges(source));
         }
+    } else if (source && 'starts' in source) {
+        return edges_from_symmetry(source);
     } else if (source) {
         return edges_from_symmetry(generate_edges_from_spec(source));
     }

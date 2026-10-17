@@ -41,20 +41,23 @@ function ray_triangle_intersect(
     return { t, u, v };
 }
 
-// Cast a ray from screen position (css_x, css_y) through the 3D model and
-// return the corresponding texture pixel coordinates [tx, ty], or null if no hit.
+// Cast a ray from screen position (css_x, css_y) through the model and return
+// the corresponding texture pixel coordinates [tx, ty], or null if no hit.
+//
+// Takes the uniforms the frame was drawn with rather than a rotation, so it
+// picks against whatever is actually on screen — the spinning solid under its
+// perspective camera, or a flat hyperbolic tiling under an orthographic one.
 export function pick_uv(
     css_x: number, css_y: number,
     css_width: number, css_height: number,
     texture_width: number, texture_height: number,
     model: Model,
-    rotation: glMatrix.quat
+    uniforms: Uniforms
 ): [number, number] | null {
     if (!model.texture) return null;
 
-    const { projector, model_transformer } = matrix_uniforms(rotation);
-    const proj = projector.value as glMatrix.mat4;
-    const mt = model_transformer.value as glMatrix.mat3;
+    const proj = uniforms.projector.value as glMatrix.mat4;
+    const mt = uniforms.model_transformer.value as glMatrix.mat3;
 
     // NDC of the mouse position
     const nx = (css_x / css_width) * 2 - 1;
@@ -198,4 +201,37 @@ export function create_canvas_texture(texture_canvas: HTMLCanvasElement): THREE.
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
     return texture;
+}
+
+// A rectangle of the plane, in the coordinates the model is already in.
+export type PlaneView = { x0: number, x1: number, y0: number, y1: number };
+
+// Orthographic view of a flat model — what the hyperbolic tilings need, since
+// they arrive already projected into the plane and have no depth to show.
+//
+// The rect is fitted inside the canvas rather than stretched to it, so a disc
+// stays a disc on a window of any shape.
+// The rect actually shown, once `view` has been fitted to the canvas. Pointer
+// handling needs this to run the mapping backwards.
+export function fit_plane_view(view: PlaneView, aspect: number): PlaneView {
+    const cx = (view.x0 + view.x1) / 2;
+    const cy = (view.y0 + view.y1) / 2;
+    const width = Math.max(view.x1 - view.x0, 1e-6);
+    const height = Math.max(view.y1 - view.y0, 1e-6);
+    let half_w = width / 2;
+    let half_h = height / 2;
+    if (aspect > width / height) half_w = half_h * aspect;
+    else half_h = half_w / aspect;
+    return { x0: cx - half_w, x1: cx + half_w, y0: cy - half_h, y1: cy + half_h };
+}
+
+export function orthographic_uniforms(view: PlaneView, aspect: number): Uniforms {
+    const fitted = fit_plane_view(view, aspect);
+    const projection = glMatrix.mat4.create();
+    glMatrix.mat4.ortho(projection,
+        fitted.x0, fitted.x1, fitted.y0, fitted.y1, -1, 1);
+    return {
+        "projector": { type: 'uniformMatrix4fv', value: projection },
+        "model_transformer": { type: 'uniformMatrix3fv', value: glMatrix.mat3.create() },
+    };
 }
