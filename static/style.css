@@ -84,6 +84,79 @@ html, body {
 
 #clear-btn       { top: calc(max(16px, env(safe-area-inset-top)) + 54px); }
 #model-picker-btn { top: calc(max(16px, env(safe-area-inset-top)) + 108px); }
+#wireframe-btn   { top: calc(max(16px, env(safe-area-inset-top)) + 162px); }
+.floating-btn.active { background: rgba(255,255,255,0.55); }
+
+/* Paper mode: the wireframe reads as ink on a page, so the canvas ground goes
+   light while it is on. The buttons sit on that ground, so they darken to stay
+   legible — their glyphs stay white rather than being recoloured. */
+body.paper {
+  background-color: #f4f3ef;
+}
+
+/* The canvas frame is a light hairline meant for the dark ground; invert it
+   so it stays a hairline on paper instead of a white gap. */
+body.paper #mainCanvas {
+  border-color: rgba(0,0,0,0.18);
+}
+
+body.paper #controls-toggle,
+body.paper .floating-btn {
+  background: rgba(0,0,0,0.45);
+}
+
+body.paper #controls-toggle:hover,
+body.paper .floating-btn:hover {
+  background: rgba(0,0,0,0.62);
+}
+
+body.paper .floating-btn.active {
+  background: rgba(0,0,0,0.78);
+}
+
+/* Wireframe controls */
+
+/* The options below the Wireframe checkbox only mean anything while it is on. */
+#wireframe-options .wf-sub {
+  transition: opacity 0.15s ease;
+}
+
+#wireframe-options.off .wf-sub {
+  opacity: 0.35;
+  pointer-events: none;
+}
+#wireframe-options select {
+  width: 100%;
+  padding: 6px;
+  border-radius: 6px;
+  border: none;
+  background: #444;
+  color: white;
+  font-family: monospace;
+  font-size: 13px;
+}
+
+#wireframe-options .slider-row,
+#shape-options .slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#wireframe-options .slider-row label,
+#shape-options .slider-row label {
+  flex: 0 0 6.5em;
+  margin-left: 0;
+  white-space: nowrap;
+}
+
+#wireframe-options .slider-row input[type=range],
+#shape-options .slider-row input[type=range] {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 18px;
+  margin: 0;
+}
 
 /* Model picker modal */
 #model-picker-overlay {
@@ -125,9 +198,18 @@ html, body {
 .model-thumb-card:active { background: rgba(255,255,255,0.2); }
 .model-thumb-card img {
   width: 100%;
-  height: 100%;
+  height: calc(100% - 22px);
   object-fit: cover;
   display: block;
+}
+.model-thumb-label {
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
+  color: #ccc;
+  font-family: monospace;
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 #spin-toggle {
@@ -255,18 +337,71 @@ legend {
   padding: 0 8px;
 }
 
-#rendering-options label {
+#rendering-options label,
+#wireframe-options label,
+#shape-options label {
   color: #ccc;
   font-size: 13px;
   margin-left: 6px;
 }
 
-#rendering-options > div {
+#rendering-options > div,
+#wireframe-options > div,
+#shape-options > div {
   margin: 8px 0;
 }
 
-#rendering-options input {
+#rendering-options input,
+#wireframe-options input,
+#shape-options input {
   accent-color: #448AFF;
+}
+
+/* Seed pad. The classic controls describe the same solid a different way, so
+   only one set is live at a time. */
+#shape-options:not(.wythoff) .seed-sub {
+  display: none;
+}
+
+#shape-options.wythoff .classic-sub {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+#shape-seed-pad {
+  display: block;
+  width: 100%;
+  max-width: 180px;
+  height: 128px;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* The panel is shrink-to-fit, so an unconstrained line of prose would widen
+   the whole thing to its max-content width. */
+#shape-seed-hint {
+  max-width: 210px;
+  color: #888;
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+/* Reset shape */
+#shape-reset {
+  width: 100%;
+  padding: 6px;
+  border-radius: 6px;
+  border: none;
+  background: #444;
+  color: white;
+  font-family: monospace;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#shape-reset:hover {
+  background: #555;
 }
 
 /* Colors */
@@ -330,13 +465,28 @@ legend {
     font-size: 16px;
   }
 
-  #rendering-options label {
+  #rendering-options label,
+  #wireframe-options label,
+  #shape-options label {
     font-size: 16px;
   }
 
-  #rendering-options input {
+  #rendering-options input[type=checkbox],
+  #rendering-options input[type=radio],
+  #wireframe-options input[type=checkbox],
+  #shape-options input[type=checkbox] {
     width: 20px;
     height: 20px;
+  }
+
+  #shape-reset {
+    padding: 10px;
+    font-size: 16px;
+  }
+
+  #wireframe-options select {
+    padding: 10px;
+    font-size: 16px;
   }
 
   fieldset {

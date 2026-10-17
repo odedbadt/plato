@@ -5316,8 +5316,10 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ });
 /* harmony import */ var _webgl_utils__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./webgl_utils */ "./src/ts/webgl_utils.ts");
 /* harmony import */ var _webgl_renderer__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./webgl_renderer */ "./src/ts/webgl_renderer.ts");
-/* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/quat.js");
-/* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/vec3.js");
+/* harmony import */ var _symmetry__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./symmetry */ "./src/ts/symmetry/index.ts");
+/* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/quat.js");
+/* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/vec3.js");
+
 
 
 function parse_RGBA(color) {
@@ -5380,10 +5382,79 @@ function _floodfill(read_ctx, write_ctx, replaced_color, new_color, x, y, w, h) 
 function project_to_sphere(x, y) {
     const r2 = x * x + y * y;
     if (r2 <= 1.0) {
-        return gl_matrix__WEBPACK_IMPORTED_MODULE_3__.fromValues(x, y, Math.sqrt(1.0 - r2));
+        return gl_matrix__WEBPACK_IMPORTED_MODULE_4__.fromValues(x, y, Math.sqrt(1.0 - r2));
     }
     const r = Math.sqrt(r2);
-    return gl_matrix__WEBPACK_IMPORTED_MODULE_3__.fromValues(x / r, y / r, 0);
+    return gl_matrix__WEBPACK_IMPORTED_MODULE_4__.fromValues(x / r, y / r, 0);
+}
+// Shape controls, by the kind of event they report changes with.
+const SHAPE_SLIDERS = ['shape-stellation', 'shape-size', 'shape-mirror-size'];
+const SHAPE_TOGGLES = ['shape-dual', 'shape-rhombic', 'shape-seed-on'];
+// Where each corner of the fundamental triangle sits on the seed pad, as
+// fractions of its box. Corner k of the triangle is PAD_CORNERS[k].
+const PAD_CORNERS = [[0.15, 0.80], [0.85, 0.80], [0.50, 0.17]];
+const DEFAULT_SEED = [1, 1, 1]; // the middle: the omnitruncated solid
+// Barycentric weights of a point on the pad. Clamping the negatives away and
+// renormalising pins a drag that leaves the triangle to the nearest edge,
+// which is where the truncations live — a useful place to land rather than
+// somewhere to be stopped from reaching.
+function pad_to_barycentric(x, y) {
+    const [[x0, y0], [x1, y1], [x2, y2]] = PAD_CORNERS;
+    const d = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2);
+    const raw = [
+        ((y1 - y2) * (x - x2) + (x2 - x1) * (y - y2)) / d,
+        ((y2 - y0) * (x - x2) + (x0 - x2) * (y - y2)) / d,
+        0
+    ];
+    raw[2] = 1 - raw[0] - raw[1];
+    const clamped = [Math.max(raw[0], 0), Math.max(raw[1], 0), Math.max(raw[2], 0)];
+    const sum = clamped[0] + clamped[1] + clamped[2] || 1;
+    return [clamped[0] / sum, clamped[1] / sum, clamped[2] / sum];
+}
+function barycentric_to_pad(seed) {
+    const sum = seed[0] + seed[1] + seed[2] || 1;
+    let x = 0, y = 0;
+    for (let k = 0; k < 3; k++) {
+        x += PAD_CORNERS[k][0] * seed[k] / sum;
+        y += PAD_CORNERS[k][1] * seed[k] / sum;
+    }
+    return [x, y];
+}
+function input_of(id) {
+    return document.getElementById(id);
+}
+function input_value(id, fallback) {
+    const parsed = parseFloat(input_of(id)?.value ?? '');
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+function input_checked(id) {
+    return !!input_of(id)?.checked;
+}
+function set_input_value(id, value) {
+    const input = input_of(id);
+    if (input)
+        input.value = String(value);
+}
+function set_input_checked(id, value) {
+    const input = input_of(id);
+    if (input)
+        input.checked = value;
+}
+// Models used to be fetched and cached in localStorage. They are all generated
+// now, so anything left under these keys is dead weight against a quota the
+// app no longer uses at all — around 350KB of it in a browser that ran the old
+// version. Swept once on startup; harmless after the first run.
+function drop_stale_model_cache() {
+    const stale = ['all_model_names', 'model_list',
+        'cube', 'dodecahedron', 'dodecahedron_a', 'icosahedron', 'icosahedron_a',
+        'octahedron', 'spinner', 'tetra_b',
+        'random_colored_st_dodec', 'random_colored_st_octa',
+        'sellated_dodecahedron', 'sellated_octahedron',
+        'stellated_dodecahedron', 'stellated_octahedron'];
+    for (const key of stale) {
+        localStorage.removeItem(key);
+        localStorage.removeItem(`static/models/${key}.json`);
+    }
 }
 class App {
     constructor(prefered_model_name, spinning_speed = 0, pen_color = null, pen_radius = null) {
@@ -5399,6 +5470,16 @@ class App {
         this.prev_mirror_coords = null;
         this.texture_canvas = null;
         this.renderer = null;
+        // Which model `this.model` is, so the wireframe can ask the generator for
+        // its edges instead of measuring them off the mesh.
+        this.model_name = null;
+        // The parameters `this.model` was generated from, as loaded (base_spec) and
+        // as the shape controls currently have them (live_spec). Null for the legacy
+        // JSON models, which have no generator to vary.
+        this.base_spec = null;
+        this.live_spec = null;
+        // Barycentric position of the Wythoff seed on the fundamental triangle.
+        this.seed = [...DEFAULT_SEED];
         // Multi-touch state
         this.active_pointers = new Map();
         this.rotating = false;
@@ -5422,34 +5503,20 @@ class App {
         this.prefered_model_name = prefered_model_name;
         this.model = null;
         this.spinning_speed = 0;
-        this.rotation = gl_matrix__WEBPACK_IMPORTED_MODULE_2__.create();
-        gl_matrix__WEBPACK_IMPORTED_MODULE_2__.rotateX(this.rotation, this.rotation, Math.PI / 3);
+        this.rotation = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create();
+        gl_matrix__WEBPACK_IMPORTED_MODULE_3__.rotateX(this.rotation, this.rotation, Math.PI / 3);
         this.pen_color = pen_color || 'green';
         this.pen_radius = pen_radius || 5;
         this.dpr = window.devicePixelRatio;
         this.spinning_speed = 0;
         this.is_spinning = false;
-        this.cache = localStorage;
-    }
-    construct_url_for_name(model_name) {
-        return `static/models/${model_name}.json`;
-    }
-    warmup_cache(model_names) {
-        const _this = this;
-        Array.from(model_names).forEach((model_name) => {
-            _this.load_model(_this.construct_url_for_name(model_name), (model) => {
-                this.cache.setItem(model_name, JSON.stringify(model));
-            });
-        });
     }
     load_spinner_model() {
-        const _this = this;
-        this.load_model(this.construct_url_for_name('spinner'), (model) => {
-            _this.spinner_model = model;
-        });
+        this.spinner_model = (0,_symmetry__WEBPACK_IMPORTED_MODULE_2__.generate_model)('spinner');
     }
     init() {
         const _this = this;
+        drop_stale_model_cache();
         this.init_canvas_sizes();
         // Initialize WebGL renderer with cached shader programs
         const main_canvas = document.getElementById("mainCanvas");
@@ -5461,48 +5528,40 @@ class App {
         this.init_palette();
         this.init_texture_sketcher();
         this.init_actions();
-        let prefered_model_name_there = false;
-        this.load_model_names((model_names) => {
-            this.model_names = model_names;
-            this.cache.setItem('all_model_names', JSON.stringify(model_names));
-            for (const model_name of model_names) {
-                if (model_name == this.prefered_model_name) {
-                    prefered_model_name_there = true;
-                }
-            }
-            const first_model = prefered_model_name_there ?
-                this.prefered_model_name :
-                model_names[0];
-            // Warmup cache
-            _this.warmup_cache(model_names);
+        {
+            this.model_names = _symmetry__WEBPACK_IMPORTED_MODULE_2__.SYMMETRY_FAMILIES.slice();
             _this.load_spinner_model();
             const container = document.getElementById('model-select-container');
             const model_select_element = document.createElement('select');
             model_select_element.id = 'model-select';
-            model_select_element.name = 'Models';
-            for (const model_name of model_names) {
+            model_select_element.name = 'Symmetry';
+            for (const family of _symmetry__WEBPACK_IMPORTED_MODULE_2__.SYMMETRY_FAMILIES) {
                 const option = document.createElement('option');
-                option.value = model_name;
-                option.textContent = model_name;
+                option.value = family;
+                option.textContent = (0,_symmetry__WEBPACK_IMPORTED_MODULE_2__.family_label)(family);
                 model_select_element.appendChild(option);
             }
             container?.appendChild(model_select_element);
-            model_select_element.value = first_model;
             model_select_element.addEventListener('change', () => {
-                this.load_and_set_model(model_select_element.value, () => { });
+                this.set_symmetry(model_select_element.value);
             });
-            this.load_and_set_model(first_model, () => {
+            this.load_preset(this.prefered_model_name, () => {
+                model_select_element.value = _this.base_spec?.family ?? _symmetry__WEBPACK_IMPORTED_MODULE_2__.SYMMETRY_FAMILIES[0];
                 const clear_btn = document.getElementById('clear-canvas-button');
                 clear_btn?.addEventListener('click', () => _this.clear());
                 // const cache_clear_btn = document.getElementById('clear-cache');
                 // cache_clear_btn.addEventListener('click', () => localStorage.clear());
-                for (const id of ['model', 'all-mirrors', 'no-mirrors', 'generating-mirrors']) {
+                for (const id of ['model', 'all-mirrors', 'no-mirrors', 'generating-mirrors',
+                    'wireframe', 'wireframe-mode', 'wf-hide-back']) {
                     document.getElementById(id)?.addEventListener('change', () => { _this.is_dirty = true; });
+                }
+                for (const id of ['wf-weight']) {
+                    document.getElementById(id)?.addEventListener('input', () => { _this.is_dirty = true; });
                 }
                 _this.is_dirty = true;
                 _this.init_animation_loop();
             });
-        });
+        }
     }
     init_animation_loop() {
         const _this = this;
@@ -5514,75 +5573,37 @@ class App {
         };
         requestAnimationFrame(animate);
     }
-    load_model(model_url, callback) {
-        const cached = this.cache.getItem(model_url);
-        if (cached) {
-            callback(JSON.parse(cached));
-            return;
-        }
-        fetch(`${model_url}#'${Date.now()}`)
-            .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! Status: ${response.status}`);
-            }
-            return response.json(); // Parse JSON from the response
-        })
-            .then(data => {
-            callback(data); // Handle the JSON data
-        })
-            .catch(error => {
-            console.error('Error fetching data:', error); // Handle errors
-        });
-    }
-    load_model_names(callback) {
-        const cache_key = 'model_list';
-        const cached = this.cache.getItem(cache_key);
-        if (cached) {
-            callback(JSON.parse(cached));
-            return;
-        }
-        fetch(`static/models/models.txt#'${Date.now()}`)
-            .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! Status: ${response.status}`);
-            }
-            return response.text();
-        })
-            .then(data => {
-            const model_names = data.split(',');
-            this.cache.setItem(cache_key, JSON.stringify(model_names));
-            callback(model_names);
-        })
-            .catch(error => {
-            console.error('Error fetching data:', error); // Handle errors
-        });
-    }
-    load_and_set_model(model_name, ready_callback) {
+    // Loads one of the named presets in MODEL_SPECS, shape controls and all.
+    // Only the opening view uses this now; the picker chooses a symmetry group
+    // and leaves the shape alone.
+    load_preset(model_name, ready_callback) {
         if (this.interval_id) {
             window.clearInterval(this.interval_id);
         }
-        const shape_name_element = document.getElementById('shape-name');
-        if (shape_name_element) {
-            shape_name_element.innerHTML = 'Loading...';
-        }
-        if (this.spinner_model) {
-            this.set_model(this.spinner_model);
-        }
-        //this.set_spinning_speed(.035);
-        const _this = this;
-        this.load_model(this.construct_url_for_name(model_name), (model) => {
-            _this.cache.setItem(model_name, JSON.stringify(model));
-            _this.set_model(model);
-            ready_callback();
-        });
+        this.set_model((0,_symmetry__WEBPACK_IMPORTED_MODULE_2__.generate_model)(model_name), model_name);
+        this.base_spec = (0,_symmetry__WEBPACK_IMPORTED_MODULE_2__.get_model_spec)(model_name);
+        this.live_spec = this.base_spec ? { ...this.base_spec } : null;
+        this.sync_shape_controls();
+        ready_callback();
+    }
+    // Swaps the reflection group under whatever the shape controls currently
+    // say, so a stellation or a seed position carries from one symmetry to the
+    // next instead of being reset by the change.
+    set_symmetry(family) {
+        if (!this.base_spec)
+            return;
+        this.base_spec = { ...this.base_spec, family };
+        this.model_name = family;
+        this.regenerate_shape();
     }
     set_spinning_speed(spinning_speed) {
         this.spinning_speed = spinning_speed || 0;
         this.is_spinning = this.spinning_speed > 0;
         //this.spin_and_draw();
     }
-    set_model(model) {
+    set_model(model, model_name = null) {
         this.model = model;
+        this.model_name = model_name;
         this.path = null;
         this.mirror_path = null;
         this.is_dirty = true;
@@ -5685,6 +5706,27 @@ class App {
         document.getElementById('clear-btn')?.addEventListener('click', () => this.clear());
         // Model picker open button
         document.getElementById('model-picker-btn')?.addEventListener('click', () => this.open_model_picker());
+        // Floating wireframe toggle, mirroring the checkbox in the controls panel
+        const wireframe_btn = document.getElementById('wireframe-btn');
+        const wireframe_checkbox = document.getElementById('wireframe');
+        const sync_wireframe_btn = () => {
+            const on = !!wireframe_checkbox?.checked;
+            wireframe_btn?.classList.toggle('active', on);
+            // Ink on paper: the ground goes light while the wireframe is up.
+            document.body.classList.toggle('paper', on);
+            // The style, weight and hide-back controls do nothing while it is off.
+            document.getElementById('wireframe-options')?.classList.toggle('off', !on);
+        };
+        wireframe_btn?.addEventListener('click', () => {
+            if (!wireframe_checkbox)
+                return;
+            wireframe_checkbox.checked = !wireframe_checkbox.checked;
+            sync_wireframe_btn();
+            this.is_dirty = true;
+        });
+        wireframe_checkbox?.addEventListener('change', sync_wireframe_btn);
+        sync_wireframe_btn();
+        this.init_shape_controls();
         // Close modal when clicking the backdrop
         const overlay = document.getElementById('model-picker-overlay');
         overlay?.addEventListener('click', (e) => {
@@ -5695,25 +5737,19 @@ class App {
     // const pen_size = pen_size_div).backgroundpen_size;
     // console.log(pen_size)
     // this.pen_pen_size = pen_size;
-    // Resolves with the model JSON, checking name-based cache first.
-    load_model_promise(model_name) {
-        const cached = this.cache.getItem(model_name);
-        if (cached)
-            return Promise.resolve(JSON.parse(cached));
-        return new Promise((resolve) => {
-            this.load_model(this.construct_url_for_name(model_name), resolve);
-        });
-    }
     async open_model_picker() {
         const overlay = document.getElementById('model-picker-overlay');
         const grid = document.getElementById('model-picker-grid');
         if (!overlay || !grid)
             return;
         overlay.classList.remove('hidden');
-        // Thumbnails are rendered once and cached as <img> elements in the grid.
-        if (grid.children.length > 0)
+        // Rebuilt on every open: the cards show each symmetry carrying whatever
+        // the shape controls currently say, so the grid is a preview of the swap
+        // rather than a fixed catalogue.
+        grid.innerHTML = '';
+        const spec = this.live_spec ?? this.base_spec;
+        if (!spec)
             return;
-        const model_names = this.model_names || [];
         // Single shared offscreen renderer reused for every thumbnail.
         const size = 128;
         const thumb_canvas = document.createElement('canvas');
@@ -5723,27 +5759,32 @@ class App {
         thumb_tex.width = 1;
         thumb_tex.height = 1;
         const thumb_renderer = new _webgl_renderer__WEBPACK_IMPORTED_MODULE_1__.WebglRenderer(thumb_canvas, thumb_tex, true);
-        const rot = gl_matrix__WEBPACK_IMPORTED_MODULE_2__.create();
-        gl_matrix__WEBPACK_IMPORTED_MODULE_2__.rotateX(rot, rot, Math.PI / 4);
-        gl_matrix__WEBPACK_IMPORTED_MODULE_2__.rotateY(rot, rot, Math.PI / 5);
+        const rot = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create();
+        gl_matrix__WEBPACK_IMPORTED_MODULE_3__.rotateX(rot, rot, Math.PI / 4);
+        gl_matrix__WEBPACK_IMPORTED_MODULE_3__.rotateY(rot, rot, Math.PI / 5);
         const uniforms = _webgl_utils__WEBPACK_IMPORTED_MODULE_0__.matrix_uniforms(rot);
-        for (const name of model_names) {
-            const model = await this.load_model_promise(name);
-            if (!model?.vertices)
-                continue;
+        for (const family of _symmetry__WEBPACK_IMPORTED_MODULE_2__.SYMMETRY_FAMILIES) {
+            const model = (0,_symmetry__WEBPACK_IMPORTED_MODULE_2__.generate_model_from_spec)({ ...spec, family });
             thumb_renderer.begin_frame();
             thumb_renderer.draw_model(model, uniforms);
             thumb_renderer.end_frame();
             const url = thumb_canvas.toDataURL();
+            const label = (0,_symmetry__WEBPACK_IMPORTED_MODULE_2__.family_label)(family);
             const card = document.createElement('div');
             card.className = 'model-thumb-card';
             const img = document.createElement('img');
             img.src = url;
-            img.alt = name;
+            img.alt = label;
             card.appendChild(img);
+            const caption = document.createElement('div');
+            caption.className = 'model-thumb-label';
+            caption.textContent = label;
+            card.appendChild(caption);
             card.addEventListener('click', () => {
-                this.load_and_set_model(name, () => { });
-                this.clear();
+                this.set_symmetry(family);
+                const select = document.getElementById('model-select');
+                if (select)
+                    select.value = family;
                 overlay.classList.add('hidden');
             });
             grid.appendChild(card);
@@ -5845,13 +5886,13 @@ class App {
             const scale = 2.0 / Math.min(rect.width, rect.height);
             const v_from = project_to_sphere((from_x - rect.width / 2) * scale, -(from_y - rect.height / 2) * scale);
             const v_to = project_to_sphere((to_x - rect.width / 2) * scale, -(to_y - rect.height / 2) * scale);
-            const axis = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.cross(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), v_from, v_to);
-            const angle = Math.acos(Math.min(1.0, gl_matrix__WEBPACK_IMPORTED_MODULE_3__.dot(v_from, v_to)));
-            if (gl_matrix__WEBPACK_IMPORTED_MODULE_3__.length(axis) > 1e-6) {
-                gl_matrix__WEBPACK_IMPORTED_MODULE_3__.normalize(axis, axis);
-                const delta = gl_matrix__WEBPACK_IMPORTED_MODULE_2__.setAxisAngle(gl_matrix__WEBPACK_IMPORTED_MODULE_2__.create(), axis, angle);
-                gl_matrix__WEBPACK_IMPORTED_MODULE_2__.multiply(this.rotation, delta, this.rotation);
-                gl_matrix__WEBPACK_IMPORTED_MODULE_2__.normalize(this.rotation, this.rotation);
+            const axis = gl_matrix__WEBPACK_IMPORTED_MODULE_4__.cross(gl_matrix__WEBPACK_IMPORTED_MODULE_4__.create(), v_from, v_to);
+            const angle = Math.acos(Math.min(1.0, gl_matrix__WEBPACK_IMPORTED_MODULE_4__.dot(v_from, v_to)));
+            if (gl_matrix__WEBPACK_IMPORTED_MODULE_4__.length(axis) > 1e-6) {
+                gl_matrix__WEBPACK_IMPORTED_MODULE_4__.normalize(axis, axis);
+                const delta = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.setAxisAngle(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), axis, angle);
+                gl_matrix__WEBPACK_IMPORTED_MODULE_3__.multiply(this.rotation, delta, this.rotation);
+                gl_matrix__WEBPACK_IMPORTED_MODULE_3__.normalize(this.rotation, this.rotation);
                 this.is_dirty = true;
             }
         };
@@ -6001,6 +6042,173 @@ class App {
             this.renderer?.mark_texture_dirty();
         });
     }
+    // Translate the wireframe controls into renderer options. The panel exposes
+    // a style, a single weight, and whether to hide what is round the back; the
+    // rest of the doc's parameters keep their recommended values.
+    // Shape controls. Everything here varies the fundamental triangle only, so
+    // the reflection group is never re-enumerated and a drag regenerates the
+    // whole solid in well under a frame.
+    init_shape_controls() {
+        const regenerate = () => this.regenerate_shape();
+        for (const id of SHAPE_SLIDERS) {
+            document.getElementById(id)?.addEventListener('input', regenerate);
+        }
+        for (const id of SHAPE_TOGGLES) {
+            document.getElementById(id)?.addEventListener('change', regenerate);
+        }
+        document.getElementById('shape-reset')?.addEventListener('click', () => {
+            this.sync_shape_controls();
+            this.regenerate_shape();
+        });
+        this.init_seed_pad();
+    }
+    // The seed pad is the fundamental triangle drawn flat: dragging the dot
+    // moves the point whose orbit under the group is the solid's vertex set.
+    init_seed_pad() {
+        const pad = document.getElementById('shape-seed-pad');
+        if (!pad)
+            return;
+        const seed_from_event = (event) => {
+            const rect = pad.getBoundingClientRect();
+            if (!rect.width || !rect.height)
+                return;
+            this.seed = pad_to_barycentric((event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height);
+            this.draw_seed_pad();
+            this.regenerate_shape();
+        };
+        pad.addEventListener('pointerdown', (event) => {
+            event.preventDefault();
+            pad.setPointerCapture(event.pointerId);
+            seed_from_event(event);
+        });
+        pad.addEventListener('pointermove', (event) => {
+            if (event.buttons & 1)
+                seed_from_event(event);
+        });
+    }
+    draw_seed_pad() {
+        const pad = document.getElementById('shape-seed-pad');
+        if (!pad || !this.base_spec)
+            return;
+        const rect = pad.getBoundingClientRect();
+        if (!rect.width || !rect.height)
+            return;
+        pad.width = Math.round(rect.width * this.dpr);
+        pad.height = Math.round(rect.height * this.dpr);
+        const context = pad.getContext('2d');
+        if (!context)
+            return;
+        context.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+        context.clearRect(0, 0, rect.width, rect.height);
+        const at = (k) => [PAD_CORNERS[k][0] * rect.width, PAD_CORNERS[k][1] * rect.height];
+        context.beginPath();
+        context.moveTo(...at(0));
+        context.lineTo(...at(1));
+        context.lineTo(...at(2));
+        context.closePath();
+        context.fillStyle = 'rgba(255,255,255,0.06)';
+        context.fill();
+        context.strokeStyle = '#777';
+        context.lineWidth = 1;
+        context.stroke();
+        // Each corner is a rotation axis; its order says which regular solid the
+        // seed collapses onto there.
+        const orders = (0,_symmetry__WEBPACK_IMPORTED_MODULE_2__.corner_orders)(this.base_spec.family);
+        context.font = '11px monospace';
+        context.fillStyle = '#aaa';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        const centre = [rect.width / 2, rect.height / 2];
+        for (let k = 0; k < 3; k++) {
+            const [cx, cy] = at(k);
+            const dx = cx - centre[0], dy = cy - centre[1];
+            const length = Math.hypot(dx, dy) || 1;
+            context.fillText(`${orders[k]}`, cx + 11 * dx / length, cy + 11 * dy / length);
+        }
+        const [sx, sy] = barycentric_to_pad(this.seed);
+        context.beginPath();
+        context.arc(sx * rect.width, sy * rect.height, 5, 0, Math.PI * 2);
+        context.fillStyle = '#448AFF';
+        context.fill();
+        context.strokeStyle = '#fff';
+        context.lineWidth = 1.5;
+        context.stroke();
+    }
+    // Put the controls back to what the loaded model asks for, and hide them
+    // entirely for the legacy models there is no generator behind.
+    sync_shape_controls() {
+        const spec = this.base_spec;
+        const section = document.getElementById('shape-options');
+        if (section)
+            section.style.display = spec ? '' : 'none';
+        if (!spec)
+            return;
+        set_input_value('shape-stellation', (0,_symmetry__WEBPACK_IMPORTED_MODULE_2__.stellation_factor)(spec));
+        set_input_value('shape-size', spec.factor ?? 1);
+        set_input_value('shape-mirror-size', spec.mirror_factor ?? 1);
+        set_input_checked('shape-dual', !!spec.dual);
+        set_input_checked('shape-rhombic', !!spec.rhombic);
+        set_input_checked('shape-seed-on', !!spec.seed);
+        this.seed = (spec.seed ?? [...DEFAULT_SEED]);
+        this.sync_seed_mode();
+    }
+    // Seed mode and the classic controls are two descriptions of the same solid,
+    // so the panel shows which one is live.
+    sync_seed_mode() {
+        const on = input_checked('shape-seed-on');
+        document.getElementById('shape-options')?.classList.toggle('wythoff', on);
+        if (on)
+            this.draw_seed_pad();
+    }
+    regenerate_shape() {
+        if (!this.base_spec)
+            return;
+        this.sync_seed_mode();
+        const seed_mode = input_checked('shape-seed-on');
+        const spec = {
+            ...this.base_spec,
+            factor: input_value('shape-size', this.base_spec.factor ?? 1),
+            mirror_factor: input_value('shape-mirror-size', this.base_spec.mirror_factor ?? 1),
+            // Where the seed sits already says whether the solid is dual, truncated
+            // or stellated-looking, so the classic knobs step aside in seed mode.
+            ...(seed_mode ? { seed: this.seed } : {
+                stellation: input_value('shape-stellation', (0,_symmetry__WEBPACK_IMPORTED_MODULE_2__.stellation_factor)(this.base_spec)),
+                dual: input_checked('shape-dual'),
+                rhombic: input_checked('shape-rhombic')
+            }),
+            // Nothing downstream of here needs the JSON models' rounding, and it
+            // costs more than the sweep itself.
+            round: false
+        };
+        this.live_spec = spec;
+        // Keeps the drawing: every fundamental triangle carries the same UVs
+        // whatever the geometry does, so the texture never has to be reset.
+        this.set_model((0,_symmetry__WEBPACK_IMPORTED_MODULE_2__.generate_model_from_spec)(spec), this.model_name);
+    }
+    wireframe_options() {
+        const style = document.getElementById('wireframe-mode')?.value
+            || 'depth-halo';
+        const weight_input = document.getElementById('wf-weight');
+        const parsed = weight_input ? parseFloat(weight_input.value) : NaN;
+        // One knob scales the whole ink range, keeping the near:far ratio — and so
+        // the strength of the depth cue — fixed while the drawing gets lighter or
+        // heavier overall.
+        const weight = Number.isFinite(parsed) ? parsed : 1;
+        const halo = style === 'depth-halo';
+        const halo_gain = 1.5; // the doc's middle of the 1-2 range that reads best
+        return {
+            ..._webgl_renderer__WEBPACK_IMPORTED_MODULE_1__.DEFAULT_WIREFRAME_OPTIONS,
+            // Paper mode means the ground is always light, so the ink is always dark.
+            color: [0.09, 0.10, 0.12],
+            flat: style === 'uniform',
+            halo,
+            hide_back: !!document.getElementById('wf-hide-back')?.checked,
+            w_min: 0.25 * weight,
+            w_max: 3.0 * weight,
+            halo_gain: halo ? halo_gain : 0,
+            halo_px: 0.5 + 10 * halo_gain,
+        };
+    }
     draw_model() {
         if (!this.is_dirty || !this.renderer) {
             return;
@@ -6016,6 +6224,18 @@ class App {
         const modelCheckbox = document.getElementById('model');
         if (modelCheckbox?.checked && this.model) {
             this.renderer.draw_model(this.model, uniforms);
+        }
+        // Draw wireframe. After the model so solid faces hide the edges behind them,
+        // before the mirrors so the mirror planes don't cull half the edges (the
+        // halo prepass does leave faint hairlines on the planes in return).
+        const wireframeCheckbox = document.getElementById('wireframe');
+        if (wireframeCheckbox?.checked && this.model) {
+            const wireframe_options = this.wireframe_options();
+            // With the solid hidden, its depth alone still removes the back edges.
+            if (wireframe_options.hide_back && !modelCheckbox?.checked) {
+                this.renderer.draw_model_depth_only(this.model, uniforms);
+            }
+            this.renderer.draw_wireframe(this.model, uniforms, wireframe_options, this.live_spec ?? this.model_name ?? undefined);
         }
         // Draw mirrors
         const allMirrorsCheckbox = document.getElementById('all-mirrors');
@@ -6050,8 +6270,11 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   FS_SOURCE: () => (/* binding */ FS_SOURCE),
 /* harmony export */   FS_SOURCE_MIRRORS: () => (/* binding */ FS_SOURCE_MIRRORS),
 /* harmony export */   FS_SOURCE_OVERLAY: () => (/* binding */ FS_SOURCE_OVERLAY),
+/* harmony export */   FS_SOURCE_WIREFRAME: () => (/* binding */ FS_SOURCE_WIREFRAME),
+/* harmony export */   FS_SOURCE_WIREFRAME_HALO: () => (/* binding */ FS_SOURCE_WIREFRAME_HALO),
 /* harmony export */   VS_SOURCE: () => (/* binding */ VS_SOURCE),
-/* harmony export */   VS_SOURCE_OVERLAY: () => (/* binding */ VS_SOURCE_OVERLAY)
+/* harmony export */   VS_SOURCE_OVERLAY: () => (/* binding */ VS_SOURCE_OVERLAY),
+/* harmony export */   VS_SOURCE_WIREFRAME: () => (/* binding */ VS_SOURCE_WIREFRAME)
 /* harmony export */ });
 const VS_SOURCE = `precision mediump float;
 
@@ -6132,6 +6355,999 @@ void main(void) {
   fragColor = vec4(sampled.rgb, sampled.a * uOpacity);
 }
 `;
+// ---------------------------------------------------------------------------
+// Wireframe passes
+//
+// Depth as *ink* rather than width: a projected line cannot usefully be thinner
+// than one pixel, so a target weight below 1px is drawn 1px wide at fractional
+// opacity. Perceived weight (width x opacity) then stays continuous across the
+// 1px boundary, and distance reads off line heaviness even at the far end.
+//
+// Both passes share this vertex shader. It expands one instanced quad per edge,
+// conservatively sized, and hands the fragment shader the segment in pixel
+// space; the fragment shaders evaluate an exact distance field against
+// gl_FragCoord, so taper, round caps and antialiasing need no interpolation
+// tricks.
+// ---------------------------------------------------------------------------
+const VS_SOURCE_WIREFRAME = `precision highp float;
+
+in vec2 aCorner;    // x: lateral side (-1/+1), y: endpoint (0/1)
+in vec3 aStart;
+in vec3 aEnd;
+
+uniform mat3 model_transformer;
+uniform mat4 projector;
+uniform vec2 uViewport;           // device pixels
+uniform float uWMin;              // target weight at the far end (px)
+uniform float uWMax;              // target weight at the near end (px)
+uniform float uInkNear;           // view depth of the model's nearest point
+uniform float uInkFar;
+uniform float uFlat;              // 1.0 = uniform 1px, ignoring depth
+uniform float uPad;               // extra quad margin in px (halo reach)
+
+out vec2 vS0;
+out vec2 vS1;
+out float vW0;                    // view depth at the endpoints
+out float vW1;
+out float vK0;                    // target ink weight at the endpoints (px)
+out float vK1;
+
+// Log ramp over the scene's actual depth range, so the whole weight range gets
+// used no matter how shallow the model is.
+float ink_weight(float view_z) {
+  float t = clamp((uInkFar - view_z) / max(uInkFar - uInkNear, 1e-4), 0.0, 1.0);
+  return mix(uWMin * pow(uWMax / uWMin, t), 1.0, uFlat);
+}
+
+void main(void) {
+  vec4 c0 = projector * vec4(model_transformer * aStart, 1.0);
+  vec4 c1 = projector * vec4(model_transformer * aEnd, 1.0);
+
+  // Pixel space, origin bottom-left to match gl_FragCoord
+  vec2 s0 = (c0.xy / c0.w * 0.5 + 0.5) * uViewport;
+  vec2 s1 = (c1.xy / c1.w * 0.5 + 0.5) * uViewport;
+
+  vS0 = s0; vS1 = s1;
+  vW0 = c0.w; vW1 = c1.w;
+  vK0 = ink_weight(c0.w);
+  vK1 = ink_weight(c1.w);
+
+  float half_px = 0.5 * clamp(max(vK0, vK1), 1.0, uWMax) + 1.5 + uPad;
+
+  vec2 d = s1 - s0;
+  float len = length(d);
+  vec2 dir = len > 1e-5 ? d / len : vec2(1.0, 0.0);
+  vec2 nrm = vec2(-dir.y, dir.x);
+
+  // aCorner.y is exactly 0 or 1, so this selects an endpoint
+  vec4 c = mix(c0, c1, aCorner.y);
+  vec2 off = nrm * aCorner.x * half_px
+           + dir * (aCorner.y * 2.0 - 1.0) * half_px;
+  c.xy += off / (0.5 * uViewport) * c.w;
+  gl_Position = c;
+}
+`;
+// Shared fragment-shader preamble: the distance field and the depth mapping.
+const WIREFRAME_FS_COMMON = `precision highp float;
+
+in vec2 vS0;
+in vec2 vS1;
+in float vW0;
+in float vW1;
+in float vK0;
+in float vK1;
+
+uniform float uWMax;
+uniform float uClipNear;
+uniform float uClipFar;
+
+// Window depth for a given view depth, matching the perspective matrix that
+// built 'projector'. Lets both passes place depth per fragment instead of
+// inheriting the quad's interpolated z.
+float window_depth(float view_z) {
+  float n = uClipNear, f = uClipFar;
+  float ndc = (f + n) / (f - n) - 2.0 * f * n / ((f - n) * max(view_z, 1e-4));
+  return clamp(ndc * 0.5 + 0.5, 0.0, 1.0);
+}
+`;
+const FS_SOURCE_WIREFRAME = WIREFRAME_FS_COMMON + `
+uniform vec3 uColor;
+uniform float uOpacity;
+uniform float uLineBias;          // view units pulled toward the camera
+uniform float uInkGamma;          // 1.0 disables the perceptual correction
+uniform float uInkOnDark;         // 1.0 when the ink is lighter than the ground
+
+out vec4 fragColor;
+
+void main(void) {
+  vec2 d = vS1 - vS0;
+  float len2 = max(dot(d, d), 1e-8);
+  float t = clamp(dot(gl_FragCoord.xy - vS0, d) / len2, 0.0, 1.0);
+  float dist = length(gl_FragCoord.xy - (vS0 + d * t));
+
+  // Weight is per-vertex, so an edge that recedes tapers along its length and
+  // crosses the width/opacity boundary smoothly where it passes 1px.
+  float k = mix(vK0, vK1, t);
+  float wid = clamp(k, 1.0, uWMax);
+  float alpha = min(k, 1.0);
+
+  float coverage = clamp(wid * 0.5 + 0.5 - dist, 0.0, 1.0);
+  if (coverage <= 0.0) discard;
+
+  // Interpolate 1/z for perspective correctness
+  float view_z = 1.0 / mix(1.0 / vW0, 1.0 / vW1, t);
+  gl_FragDepth = window_depth(view_z - uLineBias);
+
+  float a = coverage * alpha * uOpacity;
+  // Blending happens in sRGB, so a flat 30% alpha does not read as 30% ink and
+  // the depth ramp comes out uneven. A linear framebuffer would be the real
+  // fix; short of that, correcting alpha recovers the ramp for a roughly
+  // uniform ground, with the sign depending on which way the contrast runs.
+  float a_light = pow(a, 1.0 / uInkGamma);              // light ink, dark ground
+  float a_dark = 1.0 - pow(1.0 - a, 1.0 / uInkGamma);   // dark ink, light ground
+  a = mix(a_dark, a_light, uInkOnDark);
+  fragColor = vec4(uColor * a, a);   // premultiplied
+}
+`;
+// Occlusion haloes, as a depth-only prepass.
+//
+// Width tells you how far a line is but not what is in front of it where two
+// lines cross. Appel's haloed lines cut a gap in the farther line; here each
+// edge first lays down an invisible skirt a few pixels wider than itself,
+// writing depth only. Lines then draw with the depth test on, so wherever a
+// nearer edge's skirt covers a farther edge, the farther edge is cut away.
+//
+// Two things fall out of doing it in the depth buffer rather than by finding
+// crossings on the CPU. Shallow crossings self-correct: the skirt is a 2D
+// region, so a line crossing at a glancing angle stays inside it for longer and
+// gets a correspondingly longer gap, which is what the 1/sin(theta) term in a
+// crossing-based formulation approximates. And edges meeting at a shared
+// polyhedron corner sit at nearly equal depth, so uHaloEps lets them through
+// untouched without needing a shared-vertex test.
+const FS_SOURCE_WIREFRAME_HALO = WIREFRAME_FS_COMMON + `
+uniform float uHaloPx;            // outer reach of the skirt (px)
+uniform float uHaloEps;           // depth nudge protecting corners and self
+uniform float uHaloSlope;         // >0 scales gap width by depth separation
+
+out vec4 fragColor;
+
+void main(void) {
+  vec2 d = vS1 - vS0;
+  float len2 = max(dot(d, d), 1e-8);
+  float t = clamp(dot(gl_FragCoord.xy - vS0, d) / len2, 0.0, 1.0);
+  float dist = length(gl_FragCoord.xy - (vS0 + d * t));
+
+  float k = mix(vK0, vK1, t);
+  float wid = clamp(k, 1.0, uWMax);
+  float edge = wid * 0.5 + 0.5;     // the line's own footprint
+  if (dist > edge + uHaloPx) discard;
+
+  float view_z = 1.0 / mix(1.0 / vW0, 1.0 / vW1, t);
+
+  // Ramping the written depth outward turns the skirt into a depth gradient: a
+  // farther line is cut only out to the radius its own depth separation earns,
+  // so wide gaps mean a large separation and narrow gaps mean the lines nearly
+  // touch. uHaloSlope = 0 collapses this to a constant-radius halo.
+  float push = uHaloEps + uHaloSlope * max(dist - edge, 0.0);
+  gl_FragDepth = window_depth(view_z + push);
+
+  fragColor = vec4(0.0);            // color writes are disabled
+}
+`;
+
+
+/***/ },
+
+/***/ "./src/ts/symmetry/geometry.ts"
+/*!*************************************!*\
+  !*** ./src/ts/symmetry/geometry.ts ***!
+  \*************************************/
+(__unused_webpack_module, __webpack_exports__, __webpack_require__) {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   build_mirror_mesh: () => (/* binding */ build_mirror_mesh),
+/* harmony export */   crease_slots: () => (/* binding */ crease_slots),
+/* harmony export */   distinct_normals: () => (/* binding */ distinct_normals),
+/* harmony export */   fundamental_triangle: () => (/* binding */ fundamental_triangle),
+/* harmony export */   fuzzy_unique: () => (/* binding */ fuzzy_unique),
+/* harmony export */   mirror_matrices_to_group_transformations: () => (/* binding */ mirror_matrices_to_group_transformations),
+/* harmony export */   perpendicular_to_mirror_matrix: () => (/* binding */ perpendicular_to_mirror_matrix),
+/* harmony export */   place_mirrors: () => (/* binding */ place_mirrors),
+/* harmony export */   stellation_factor: () => (/* binding */ stellation_factor),
+/* harmony export */   transformations_to_edges: () => (/* binding */ transformations_to_edges),
+/* harmony export */   transformations_to_mesh: () => (/* binding */ transformations_to_mesh),
+/* harmony export */   unitary_matrix_from_left_column: () => (/* binding */ unitary_matrix_from_left_column),
+/* harmony export */   vector_to_perpendicular_circle: () => (/* binding */ vector_to_perpendicular_circle)
+/* harmony export */ });
+/* harmony import */ var _linalg__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./linalg */ "./src/ts/symmetry/linalg.ts");
+// Port of ~/work/weekend/concepts/symmetry/utils/geometry.py — the Coxeter
+// kaleidoscope construction that generates Plato's polyhedra.
+//
+// Three mirror planes placed at angles pi/x, pi/y, pi/z generate a finite
+// reflection group. Enumerating the group orbit of a single fundamental
+// triangle tiles the whole solid.
+//
+// Quirks of the original are reproduced deliberately so the generated geometry
+// matches the JSON models that shipped before; each is called out below.
+
+const DEFAULT_DECIMALS = 3;
+const NORMAL_DECIMALS = 9; // distinct_normals rounds harder than everything else
+// UV corners of each fundamental triangle, as shipped in the JSON models.
+const TRIANGLE_UVS = [0, 0, 0, 1, 1, 0];
+// Unit normals of three mirror planes meeting at angles pi/x, pi/y, pi/z.
+function place_mirrors(x, y, z) {
+    const a = Math.PI / x; // between mirrors 0 and 1
+    const b = Math.PI / y; // between mirrors 0 and 2
+    const c = Math.PI / z; // between mirrors 1 and 2
+    // Angle between the (2,0) and (2,1) intersection lines.
+    const C = Math.acos((Math.cos(c) - Math.cos(a) * Math.cos(b)) / (Math.sin(a) * Math.sin(b)));
+    return [
+        [1, 0, 0],
+        [Math.cos(a), Math.sin(a), 0],
+        [Math.cos(b), Math.sin(b) * Math.cos(C), Math.sin(b) * Math.sin(C)]
+    ];
+}
+// Householder reflection I - 2pp^T for a unit perpendicular p.
+function perpendicular_to_mirror_matrix(p) {
+    return [
+        1 - 2 * p[0] * p[0], -2 * p[1] * p[0], -2 * p[2] * p[0],
+        -2 * p[0] * p[1], 1 - 2 * p[1] * p[1], -2 * p[2] * p[1],
+        -2 * p[0] * p[2], -2 * p[1] * p[2], 1 - 2 * p[2] * p[2]
+    ];
+}
+// Keeps the first of each group of matrices within `threshold` (Frobenius) of
+// one another, preserving input order.
+function fuzzy_unique(matrices, threshold = 10e-3) {
+    const limit = threshold * threshold;
+    const kept = [];
+    for (const candidate of matrices) {
+        let duplicate = false;
+        for (const seen of kept) {
+            if ((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.squared_distance)(candidate, seen) < limit) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate)
+            kept.push(candidate);
+    }
+    return kept;
+}
+// Closure under left-multiplication by the mirrors, enumerating the group.
+function mirror_matrices_to_group_transformations(mirror_matrices) {
+    let transformations = [_linalg__WEBPACK_IMPORTED_MODULE_0__.IDENTITY3.slice()];
+    for (let iteration = 0; iteration < 20; iteration++) {
+        const applied = [];
+        // Mirror-major order, matching numpy's (3, n, 3, 3) reshape.
+        for (const mirror of mirror_matrices) {
+            for (const transformation of transformations) {
+                applied.push((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.mat_multiply)(mirror, transformation));
+            }
+        }
+        const next = fuzzy_unique(transformations.concat(applied));
+        if (next.length === transformations.length)
+            return next;
+        transformations = next;
+    }
+    return transformations;
+}
+// Orthonormal basis whose first column is the given axis.
+function unitary_matrix_from_left_column(left_column) {
+    const m = [
+        left_column[0], 0, 0,
+        left_column[1], 1, 0,
+        left_column[2], 0, 1
+    ];
+    (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.set_column)(m, 0, (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.normalize)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.column)(m, 0)));
+    const c0 = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.column)(m, 0);
+    const c1 = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.column)(m, 1);
+    (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.set_column)(m, 1, (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.normalize)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.subtract)(c1, (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(c0, (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.dot)(c0, c1)))));
+    (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.set_column)(m, 2, (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.normalize)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.cross)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.column)(m, 0), (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.column)(m, 1))));
+    return m;
+}
+// A plane and its opposite normal are the same plane, so normals are flipped
+// to a canonical orientation before dedup: first non-zero component positive.
+//
+// The original compared against exactly 0. Components that are zero in exact
+// arithmetic land on +-1e-17 in floating point, so that test branched
+// inconsistently and let n and -n through as two "distinct" planes — the
+// icosahedral group came out with 17 planes instead of 15, drawing two of the
+// mirror discs twice. Comparing against an epsilon (and snapping the noise to
+// zero) collapses those pairs. Pass `legacy_duplicate_planes` to get the old
+// 17-plane behaviour back; note it cannot be reproduced bit-for-bit, since
+// which of the two signs survives is pure float noise.
+const NORMAL_EPSILON = 1e-9;
+function distinct_normals(mirrors, transformations, legacy_duplicate_planes = false) {
+    const seen = new Map();
+    for (const transformation of transformations) {
+        for (const mirror of mirrors) {
+            const n = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.normalize)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.mat_apply)(transformation, mirror));
+            let directed;
+            if (legacy_duplicate_planes) {
+                if (n[0] < 0)
+                    directed = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.negate)(n);
+                else if (n[0] === 0 && n[1] < 0)
+                    directed = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.negate)(n);
+                else if (n[0] === 0 && n[1] === 0 && n[2] < 0)
+                    directed = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.negate)(n);
+                else
+                    directed = n;
+            }
+            else {
+                const snapped = [
+                    Math.abs(n[0]) < NORMAL_EPSILON ? 0 : n[0],
+                    Math.abs(n[1]) < NORMAL_EPSILON ? 0 : n[1],
+                    Math.abs(n[2]) < NORMAL_EPSILON ? 0 : n[2]
+                ];
+                const leading = snapped.find(c => c !== 0) ?? 0;
+                directed = leading < 0 ? (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.negate)(snapped) : snapped;
+            }
+            const rounded = [
+                (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.round_to)(directed[0], NORMAL_DECIMALS),
+                (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.round_to)(directed[1], NORMAL_DECIMALS),
+                (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.round_to)(directed[2], NORMAL_DECIMALS)
+            ];
+            const key = `${rounded[0]},${rounded[1]},${rounded[2]}`;
+            if (!seen.has(key))
+                seen.set(key, rounded);
+        }
+    }
+    return Array.from(seen.values());
+}
+// A disc perpendicular to `rotation_axis`, as a fan of `number_of_rays`
+// triangles, each (ray, rotated ray, origin). Returns flat xyz triplets.
+function vector_to_perpendicular_circle(rotation_axis, number_of_rays) {
+    const a = 2 * Math.PI / number_of_rays;
+    const base_rotator = [
+        1, 0, 0,
+        0, Math.cos(a), -Math.sin(a),
+        0, Math.sin(a), Math.cos(a)
+    ];
+    const m = unitary_matrix_from_left_column(rotation_axis);
+    const rotator = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.mat_multiply)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.mat_multiply)(m, base_rotator), (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.transpose)(m));
+    const result = [];
+    let ray = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.column)(m, 2);
+    for (let j = 0; j < number_of_rays; j++) {
+        const rotated = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.mat_apply)(rotator, ray);
+        result.push(...(0,_linalg__WEBPACK_IMPORTED_MODULE_0__.normalize)(ray));
+        result.push(...(0,_linalg__WEBPACK_IMPORTED_MODULE_0__.normalize)(rotated));
+        result.push(0, 0, 0);
+        ray = rotated;
+    }
+    return result;
+}
+function build_mirror_mesh(mirrors, transformations, number_of_rays = 50, factor = 1, legacy_duplicate_planes = false) {
+    const normal_tuples = distinct_normals(mirrors, transformations, legacy_duplicate_planes);
+    const mesh = [];
+    const normals = [];
+    for (const normal of normal_tuples) {
+        const circle = vector_to_perpendicular_circle(normal, number_of_rays);
+        for (const value of circle)
+            mesh.push(value * factor);
+        for (let i = 0; i < number_of_rays * 3; i++) {
+            normals.push(normal[0], normal[1], normal[2]);
+        }
+    }
+    return { mesh, normals };
+}
+// How far v2 is pushed out before the triangle is rescaled. `stellated: true`
+// is the classic factor of 2; `stellation` replaces it with any value, so a
+// slider can travel continuously between the solid (1) and its stellation (2).
+//
+// Only at those special values does a face stay flat across the edges the
+// group reflects it over, so intermediate settings are genuinely creased
+// everywhere — crease_slots() reports that honestly and the wireframe gets
+// denser in between.
+function stellation_factor(options) {
+    return options.stellation ?? (options.stellated ? 2 : 1);
+}
+function fundamental_triangle(mirrors, options = {}) {
+    const { dual = false, rhombic = false, factor = 1.0 } = options;
+    const stellation = stellation_factor(options);
+    const indices = dual ? [0, 2, 1] : [0, 1, 2];
+    const m1xm2 = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.normalize)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.cross)(mirrors[indices[1]], mirrors[indices[2]]));
+    const m2xm0 = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.normalize)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.cross)(mirrors[indices[2]], mirrors[indices[0]]));
+    // Quirk: reversed relative to its name — cross(m1, m0), not cross(m0, m1).
+    // This sets the triangle winding; flipping it inverts every face.
+    const m0xm1 = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.normalize)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.cross)(mirrors[indices[1]], mirrors[indices[0]]));
+    let v0 = m1xm2;
+    let v1 = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(m2xm0, 1 / (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.dot)(m2xm0, m1xm2));
+    // Quirk: v2 multiplies by the dot product where v1 divides; only the
+    // rhombic variant divides in both.
+    let v2 = rhombic
+        ? (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(m0xm1, 1 / (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.dot)(m0xm1, m1xm2))
+        : (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(m0xm1, (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.dot)(m0xm1, m1xm2));
+    if (stellation !== 1)
+        v2 = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(v2, stellation);
+    // Radial scale per corner, applied before the triangle is renormalised.
+    // Two of the shipped models pull a corner in by a factor the formulas
+    // above cannot produce; see MODEL_SPECS.
+    const scales = options.corner_scales;
+    if (scales) {
+        v0 = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(v0, scales[0]);
+        v1 = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(v1, scales[1]);
+        v2 = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(v2, scales[2]);
+    }
+    const max_norm = Math.max((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.norm)(v0), (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.norm)(v1), (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.norm)(v2));
+    v0 = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(v0, factor / max_norm);
+    v1 = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(v1, factor / max_norm);
+    v2 = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(v2, factor / max_norm);
+    // Flat per-face normal, left unnormalised exactly as in the original.
+    const face_normal = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.cross)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.subtract)(v0, v1), (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.subtract)(v0, v2));
+    return {
+        v0, v1, v2, face_normal,
+        edge_mirrors: [indices[2], indices[0], indices[1]]
+    };
+}
+// Reflecting the fundamental triangle across the plane holding one of its
+// edges produces the neighbour sharing that edge. The two are coplanar — so
+// the edge is interior to a face rather than a crease — exactly when the
+// mirror is perpendicular to the face, i.e. when the face normal is
+// perpendicular to the mirror normal.
+//
+// This is what makes the generated models easier to wireframe than the meshes
+// they produce: the question is settled by three dot products on one triangle,
+// with no dihedral-angle threshold and no tolerance for the mesh's rounding.
+// The two cases are not close — creases land around 0.3 to 0.8, face interiors
+// at 1e-16 — and which slot is which varies by solid, so it cannot be hardcoded
+// (the stellated octahedron creases along a different edge than the cube).
+const CREASE_EPSILON = 1e-6;
+// Edge endpoints keep this much precision regardless of the mesh's own
+// rounding; the wireframe's depth bias covers the sub-thousandth offset.
+const EDGE_DECIMALS = 6;
+function crease_slots(triangle, mirrors) {
+    const n = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.normalize)(triangle.face_normal);
+    return triangle.edge_mirrors.map(index => Math.abs((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.dot)(n, (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.normalize)(mirrors[index]))) > CREASE_EPSILON);
+}
+// Sweeps the fundamental triangle's crease edges through the whole group,
+// yielding every real edge of the solid and nothing else. Endpoints are
+// rounded like the mesh so the wireframe sits exactly on the surface.
+function transformations_to_edges(mirrors, transformations, options = {}) {
+    // Round no coarser than the mesh, but not as coarse as the spinner's 2
+    // decimals: at factor 0.25 that is ~4% of the model, enough to fuse
+    // distinct corners when the edges are welded.
+    const decimals = Math.max(options.decimals ?? DEFAULT_DECIMALS, EDGE_DECIMALS);
+    const triangle = fundamental_triangle(mirrors, options);
+    const creases = crease_slots(triangle, mirrors);
+    const corners = [triangle.v0, triangle.v1, triangle.v2];
+    const starts = [];
+    const ends = [];
+    const edge_mirrors = [];
+    const round3 = (v) => [
+        (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.round_to)(v[0], decimals), (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.round_to)(v[1], decimals), (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.round_to)(v[2], decimals)
+    ];
+    for (const transformation of transformations) {
+        for (let slot = 0; slot < 3; slot++) {
+            if (!creases[slot])
+                continue;
+            const a = round3((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.mat_apply)(transformation, corners[slot]));
+            const b = round3((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.mat_apply)(transformation, corners[(slot + 1) % 3]));
+            starts.push(...a);
+            ends.push(...b);
+            edge_mirrors.push(triangle.edge_mirrors[slot]);
+        }
+    }
+    return { starts, ends, edge_mirrors };
+}
+// Builds the fundamental triangle and sweeps it through the whole group.
+function transformations_to_mesh(mirrors, transformations, options = {}) {
+    const { dual = false, stellated = false, rhombic = false, factor = 1.0, mirror_factor = 1.0, number_of_rays = 50, include_mirrors = true, decimals = DEFAULT_DECIMALS, texture_padding = 18, round = true, legacy_duplicate_planes = false } = options;
+    const q = round ? (v) => (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.round_to)(v, decimals) : (v) => v;
+    const t = transformations.length;
+    const { v0, v1, v2, face_normal } = fundamental_triangle(mirrors, options);
+    const vertices = [];
+    const normals = [];
+    for (const transformation of transformations) {
+        for (const v of [v0, v1, v2]) {
+            const p = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.mat_apply)(transformation, v);
+            vertices.push(q(p[0]), q(p[1]), q(p[2]));
+        }
+        const n = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.mat_apply)(transformation, face_normal);
+        const rn = [q(n[0]), q(n[1]), q(n[2])];
+        normals.push(...rn, ...rn, ...rn);
+    }
+    // Quirk: the shipped models emit t+18 triangles' worth of UVs rather than
+    // t, so the tail past the draw range is never read. Harmless, and kept so
+    // generated models stay comparable to the JSON they replace.
+    const texture = [];
+    for (let i = 0; i < t + texture_padding; i++)
+        texture.push(...TRIANGLE_UVS);
+    const model = { vertices, normals, texture };
+    if (include_mirrors) {
+        const { mesh, normals: mesh_normals } = build_mirror_mesh(mirrors, transformations, number_of_rays, mirror_factor, legacy_duplicate_planes);
+        model.mirrors = round ? mesh.map(q) : mesh;
+        model.mirror_normals = round ? mesh_normals.map(q) : mesh_normals;
+    }
+    return model;
+}
+
+
+/***/ },
+
+/***/ "./src/ts/symmetry/index.ts"
+/*!**********************************!*\
+  !*** ./src/ts/symmetry/index.ts ***!
+  \**********************************/
+(__unused_webpack_module, __webpack_exports__, __webpack_require__) {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   GENERATED_MODEL_NAMES: () => (/* reexport safe */ _models__WEBPACK_IMPORTED_MODULE_2__.GENERATED_MODEL_NAMES),
+/* harmony export */   IDENTITY3: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.IDENTITY3),
+/* harmony export */   MODEL_SPECS: () => (/* reexport safe */ _models__WEBPACK_IMPORTED_MODULE_2__.MODEL_SPECS),
+/* harmony export */   SYMMETRY_FAMILIES: () => (/* reexport safe */ _models__WEBPACK_IMPORTED_MODULE_2__.SYMMETRY_FAMILIES),
+/* harmony export */   add: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.add),
+/* harmony export */   build_mirror_mesh: () => (/* reexport safe */ _geometry__WEBPACK_IMPORTED_MODULE_1__.build_mirror_mesh),
+/* harmony export */   column: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.column),
+/* harmony export */   corner_orders: () => (/* reexport safe */ _models__WEBPACK_IMPORTED_MODULE_2__.corner_orders),
+/* harmony export */   crease_slots: () => (/* reexport safe */ _geometry__WEBPACK_IMPORTED_MODULE_1__.crease_slots),
+/* harmony export */   cross: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.cross),
+/* harmony export */   distinct_normals: () => (/* reexport safe */ _geometry__WEBPACK_IMPORTED_MODULE_1__.distinct_normals),
+/* harmony export */   dot: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.dot),
+/* harmony export */   family_label: () => (/* reexport safe */ _models__WEBPACK_IMPORTED_MODULE_2__.family_label),
+/* harmony export */   family_order: () => (/* reexport safe */ _models__WEBPACK_IMPORTED_MODULE_2__.family_order),
+/* harmony export */   fundamental_triangle: () => (/* reexport safe */ _geometry__WEBPACK_IMPORTED_MODULE_1__.fundamental_triangle),
+/* harmony export */   fuzzy_unique: () => (/* reexport safe */ _geometry__WEBPACK_IMPORTED_MODULE_1__.fuzzy_unique),
+/* harmony export */   generate_edges: () => (/* reexport safe */ _models__WEBPACK_IMPORTED_MODULE_2__.generate_edges),
+/* harmony export */   generate_edges_from_spec: () => (/* reexport safe */ _models__WEBPACK_IMPORTED_MODULE_2__.generate_edges_from_spec),
+/* harmony export */   generate_model: () => (/* reexport safe */ _models__WEBPACK_IMPORTED_MODULE_2__.generate_model),
+/* harmony export */   generate_model_from_spec: () => (/* reexport safe */ _models__WEBPACK_IMPORTED_MODULE_2__.generate_model_from_spec),
+/* harmony export */   get_family: () => (/* reexport safe */ _models__WEBPACK_IMPORTED_MODULE_2__.get_family),
+/* harmony export */   get_model_spec: () => (/* reexport safe */ _models__WEBPACK_IMPORTED_MODULE_2__.get_model_spec),
+/* harmony export */   is_generated_model: () => (/* reexport safe */ _models__WEBPACK_IMPORTED_MODULE_2__.is_generated_model),
+/* harmony export */   mat_apply: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.mat_apply),
+/* harmony export */   mat_multiply: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.mat_multiply),
+/* harmony export */   mirror_matrices_to_group_transformations: () => (/* reexport safe */ _geometry__WEBPACK_IMPORTED_MODULE_1__.mirror_matrices_to_group_transformations),
+/* harmony export */   negate: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.negate),
+/* harmony export */   norm: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.norm),
+/* harmony export */   normalize: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.normalize),
+/* harmony export */   perpendicular_to_mirror_matrix: () => (/* reexport safe */ _geometry__WEBPACK_IMPORTED_MODULE_1__.perpendicular_to_mirror_matrix),
+/* harmony export */   place_mirrors: () => (/* reexport safe */ _geometry__WEBPACK_IMPORTED_MODULE_1__.place_mirrors),
+/* harmony export */   round_to: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.round_to),
+/* harmony export */   scale: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.scale),
+/* harmony export */   set_column: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.set_column),
+/* harmony export */   squared_distance: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.squared_distance),
+/* harmony export */   stellation_factor: () => (/* reexport safe */ _geometry__WEBPACK_IMPORTED_MODULE_1__.stellation_factor),
+/* harmony export */   subtract: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.subtract),
+/* harmony export */   transformations_to_edges: () => (/* reexport safe */ _geometry__WEBPACK_IMPORTED_MODULE_1__.transformations_to_edges),
+/* harmony export */   transformations_to_mesh: () => (/* reexport safe */ _geometry__WEBPACK_IMPORTED_MODULE_1__.transformations_to_mesh),
+/* harmony export */   transpose: () => (/* reexport safe */ _linalg__WEBPACK_IMPORTED_MODULE_0__.transpose),
+/* harmony export */   unitary_matrix_from_left_column: () => (/* reexport safe */ _geometry__WEBPACK_IMPORTED_MODULE_1__.unitary_matrix_from_left_column),
+/* harmony export */   vector_to_perpendicular_circle: () => (/* reexport safe */ _geometry__WEBPACK_IMPORTED_MODULE_1__.vector_to_perpendicular_circle)
+/* harmony export */ });
+/* harmony import */ var _linalg__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./linalg */ "./src/ts/symmetry/linalg.ts");
+/* harmony import */ var _geometry__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./geometry */ "./src/ts/symmetry/geometry.ts");
+/* harmony import */ var _models__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./models */ "./src/ts/symmetry/models.ts");
+
+
+
+
+
+/***/ },
+
+/***/ "./src/ts/symmetry/linalg.ts"
+/*!***********************************!*\
+  !*** ./src/ts/symmetry/linalg.ts ***!
+  \***********************************/
+(__unused_webpack_module, __webpack_exports__, __webpack_require__) {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   IDENTITY3: () => (/* binding */ IDENTITY3),
+/* harmony export */   add: () => (/* binding */ add),
+/* harmony export */   column: () => (/* binding */ column),
+/* harmony export */   cross: () => (/* binding */ cross),
+/* harmony export */   dot: () => (/* binding */ dot),
+/* harmony export */   mat_apply: () => (/* binding */ mat_apply),
+/* harmony export */   mat_multiply: () => (/* binding */ mat_multiply),
+/* harmony export */   negate: () => (/* binding */ negate),
+/* harmony export */   norm: () => (/* binding */ norm),
+/* harmony export */   normalize: () => (/* binding */ normalize),
+/* harmony export */   round_to: () => (/* binding */ round_to),
+/* harmony export */   scale: () => (/* binding */ scale),
+/* harmony export */   set_column: () => (/* binding */ set_column),
+/* harmony export */   squared_distance: () => (/* binding */ squared_distance),
+/* harmony export */   subtract: () => (/* binding */ subtract),
+/* harmony export */   transpose: () => (/* binding */ transpose)
+/* harmony export */ });
+// Minimal 3-vector / 3x3-matrix helpers for the symmetry group construction.
+// Matrices are row-major flat arrays: m[row * 3 + col].
+const IDENTITY3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+function dot(a, b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+function cross(a, b) {
+    return [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0]
+    ];
+}
+function norm(v) {
+    return Math.sqrt(dot(v, v));
+}
+// Mirrors numpy's `v / np.where(norm, norm, 1)`: a zero vector passes through
+// unchanged rather than producing NaN.
+function normalize(v) {
+    const n = norm(v);
+    const d = n !== 0 ? n : 1;
+    return [v[0] / d, v[1] / d, v[2] / d];
+}
+function scale(v, s) {
+    return [v[0] * s, v[1] * s, v[2] * s];
+}
+function add(a, b) {
+    return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+}
+function subtract(a, b) {
+    return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+function negate(v) {
+    return [-v[0], -v[1], -v[2]];
+}
+function mat_multiply(a, b) {
+    const out = new Array(9);
+    for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 3; c++) {
+            out[r * 3 + c] =
+                a[r * 3] * b[c] +
+                    a[r * 3 + 1] * b[3 + c] +
+                    a[r * 3 + 2] * b[6 + c];
+        }
+    }
+    return out;
+}
+function mat_apply(m, v) {
+    return [
+        m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
+        m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
+        m[6] * v[0] + m[7] * v[1] + m[8] * v[2]
+    ];
+}
+function transpose(m) {
+    return [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]];
+}
+function column(m, c) {
+    return [m[c], m[3 + c], m[6 + c]];
+}
+function set_column(m, c, v) {
+    m[c] = v[0];
+    m[3 + c] = v[1];
+    m[6 + c] = v[2];
+}
+// Squared Frobenius distance between two 3x3 matrices.
+function squared_distance(a, b) {
+    let sum = 0;
+    for (let i = 0; i < 9; i++) {
+        const d = a[i] - b[i];
+        sum += d * d;
+    }
+    return sum;
+}
+function round_to(x, decimals) {
+    const f = Math.pow(10, decimals);
+    const r = Math.round(x * f) / f;
+    return r === 0 ? 0 : r; // collapse -0 so output matches the JSON's 0
+}
+
+
+/***/ },
+
+/***/ "./src/ts/symmetry/models.ts"
+/*!***********************************!*\
+  !*** ./src/ts/symmetry/models.ts ***!
+  \***********************************/
+(__unused_webpack_module, __webpack_exports__, __webpack_require__) {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   GENERATED_MODEL_NAMES: () => (/* binding */ GENERATED_MODEL_NAMES),
+/* harmony export */   MODEL_SPECS: () => (/* binding */ MODEL_SPECS),
+/* harmony export */   SYMMETRY_FAMILIES: () => (/* binding */ SYMMETRY_FAMILIES),
+/* harmony export */   corner_orders: () => (/* binding */ corner_orders),
+/* harmony export */   family_label: () => (/* binding */ family_label),
+/* harmony export */   family_order: () => (/* binding */ family_order),
+/* harmony export */   generate_edges: () => (/* binding */ generate_edges),
+/* harmony export */   generate_edges_from_spec: () => (/* binding */ generate_edges_from_spec),
+/* harmony export */   generate_model: () => (/* binding */ generate_model),
+/* harmony export */   generate_model_from_spec: () => (/* binding */ generate_model_from_spec),
+/* harmony export */   get_family: () => (/* binding */ get_family),
+/* harmony export */   get_model_spec: () => (/* binding */ get_model_spec),
+/* harmony export */   is_generated_model: () => (/* binding */ is_generated_model)
+/* harmony export */ });
+/* harmony import */ var _geometry__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./geometry */ "./src/ts/symmetry/geometry.ts");
+/* harmony import */ var _wythoff__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./wythoff */ "./src/ts/symmetry/wythoff.ts");
+// Per-model parameters for the generated polyhedra, transcribed from
+// ~/work/weekend/concepts/symmetry/solve_for_polytopes.py.
+//
+// Note the dual flip between families: in the icosahedral group the non-dual
+// mesh is `dodecahedron_a` and its dual is `icosahedron_a`, while in the
+// octahedral group the non-dual mesh is `cube` and the dual is `octahedron`.
+// That asymmetry is in the original; the names are kept as shipped.
+
+
+const FAMILY_ANGLES = {
+    icosahedral: [5, 3, 2], // group order 120
+    octahedral: [4, 3, 2], // group order 48
+    tetrahedral: [3, 3, 2] // group order 24
+};
+// Rotation order of the axis through each corner of the fundamental triangle,
+// in corner order. Corner k is where mirrors k+1 and k+2 meet; place_mirrors
+// separates mirrors 0 and 1 by pi/x, 0 and 2 by pi/y, and 1 and 2 by pi/z, so
+// corner 0 turns z-fold, corner 1 y-fold and corner 2 x-fold.
+function corner_orders(family) {
+    const [x, y, z] = FAMILY_ANGLES[family];
+    return [z, y, x];
+}
+const MODEL_SPECS = {
+    cube: { family: 'octahedral' },
+    octahedron: { family: 'octahedral', dual: true },
+    stellated_octahedron: { family: 'octahedral', stellated: true },
+    dodecahedron_a: { family: 'icosahedral' },
+    icosahedron_a: { family: 'icosahedral', dual: true },
+    stellated_dodecahedron: { family: 'icosahedral', stellated: true },
+    tetra_b: { family: 'tetrahedral' },
+    // The four below shipped as JSON until their parameters were recovered by
+    // fitting the meshes; each reproduces the file it replaced to 1e-16. The
+    // random_colored_* pair needs `corner_scales` because the driver pulled
+    // corner 1 in by a factor none of the formulas above produce, and their
+    // names are left as they were even though the colours went with the files
+    // — nothing ever rendered them, as no shader declares aVertexColor.
+    sellated_dodecahedron: {
+        family: 'icosahedral', rhombic: true,
+        stellation: 1.1458980337503153 // 1 + phi^-4
+    },
+    sellated_octahedron: { family: 'octahedral', rhombic: true, stellation: 1.5 },
+    random_colored_st_dodec: {
+        family: 'icosahedral', corner_scales: [1, 0.631475730333306, 1]
+    },
+    random_colored_st_octa: {
+        family: 'octahedral', corner_scales: [1, 1 / 3, 1]
+    },
+    // The spinner is drawn during loading and never gets a mirror overlay, so
+    // it ships without mirror geometry, at coarser precision and without the
+    // texture padding the other models carry.
+    spinner: {
+        family: 'tetrahedral',
+        factor: 0.25,
+        include_mirrors: false,
+        decimals: 2,
+        texture_padding: 0
+    }
+};
+const GENERATED_MODEL_NAMES = Object.keys(MODEL_SPECS);
+// What the picker offers, now that the shape controls cover the variation the
+// old per-mesh names used to stand for: the reflection group itself, smallest
+// first. MODEL_SPECS stays as the preset registry behind generate_model(name)
+// — it is where the parameters recovered from the retired JSON live — but the
+// names there are history, not a menu.
+const SYMMETRY_FAMILIES = [
+    'tetrahedral', 'octahedral', 'icosahedral'
+];
+// "Icosahedral (5,3,2)" — the group by name, with the Coxeter triple whose
+// mirror angles pi/x, pi/y, pi/z generate it.
+function family_label(family) {
+    const [x, y, z] = FAMILY_ANGLES[family];
+    return `${family[0].toUpperCase()}${family.slice(1)} (${x},${y},${z})`;
+}
+function family_order(family) {
+    return get_family(family).transformations.length;
+}
+// Enumerating a reflection group takes long enough to be worth doing once.
+const family_cache = new Map();
+function get_family(name) {
+    const cached = family_cache.get(name);
+    if (cached)
+        return cached;
+    const [x, y, z] = FAMILY_ANGLES[name];
+    const mirrors = (0,_geometry__WEBPACK_IMPORTED_MODULE_0__.place_mirrors)(x, y, z);
+    const transformations = (0,_geometry__WEBPACK_IMPORTED_MODULE_0__.mirror_matrices_to_group_transformations)(mirrors.map(_geometry__WEBPACK_IMPORTED_MODULE_0__.perpendicular_to_mirror_matrix));
+    const family = { mirrors, transformations };
+    family_cache.set(name, family);
+    return family;
+}
+function is_generated_model(model_name) {
+    return Object.prototype.hasOwnProperty.call(MODEL_SPECS, model_name);
+}
+// A copy of a model's parameters, for a caller that wants to vary them. Null
+// for the legacy JSON models, which have no generator behind them.
+function get_model_spec(model_name) {
+    const spec = MODEL_SPECS[model_name];
+    return spec ? { ...spec } : null;
+}
+function spec_of(model_name) {
+    const spec = MODEL_SPECS[model_name];
+    if (!spec)
+        throw new Error(`Unknown generated model: ${model_name}`);
+    return spec;
+}
+// Nothing here depends on a spec being one of MODEL_SPECS: the group is keyed
+// by family alone, so a spec edited at runtime generates just as well as a
+// registered one. That is what the shape controls ride on.
+function generate_model_from_spec(spec) {
+    const { mirrors, transformations } = get_family(spec.family);
+    return spec.seed
+        ? (0,_wythoff__WEBPACK_IMPORTED_MODULE_1__.wythoff_mesh)(mirrors, transformations, spec)
+        : (0,_geometry__WEBPACK_IMPORTED_MODULE_0__.transformations_to_mesh)(mirrors, transformations, spec);
+}
+function generate_edges_from_spec(spec) {
+    const { mirrors, transformations } = get_family(spec.family);
+    return spec.seed
+        ? (0,_wythoff__WEBPACK_IMPORTED_MODULE_1__.wythoff_edges)(mirrors, transformations, spec)
+        : (0,_geometry__WEBPACK_IMPORTED_MODULE_0__.transformations_to_edges)(mirrors, transformations, spec);
+}
+function generate_model(model_name) {
+    return generate_model_from_spec(spec_of(model_name));
+}
+// The solid's real edges, straight from the group rather than recovered from
+// the mesh afterwards.
+function generate_edges(model_name) {
+    return generate_edges_from_spec(spec_of(model_name));
+}
+
+
+/***/ },
+
+/***/ "./src/ts/symmetry/wythoff.ts"
+/*!************************************!*\
+  !*** ./src/ts/symmetry/wythoff.ts ***!
+  \************************************/
+(__unused_webpack_module, __webpack_exports__, __webpack_require__) {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   seed_point: () => (/* binding */ seed_point),
+/* harmony export */   triangle_corners: () => (/* binding */ triangle_corners),
+/* harmony export */   wythoff_cell: () => (/* binding */ wythoff_cell),
+/* harmony export */   wythoff_edges: () => (/* binding */ wythoff_edges),
+/* harmony export */   wythoff_mesh: () => (/* binding */ wythoff_mesh)
+/* harmony export */ });
+/* harmony import */ var _linalg__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./linalg */ "./src/ts/symmetry/linalg.ts");
+/* harmony import */ var _geometry__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./geometry */ "./src/ts/symmetry/geometry.ts");
+// The Wythoff construction: one seed point instead of one triangle.
+//
+// transformations_to_mesh() sweeps the fundamental triangle itself through the
+// group, so the solid it draws is fixed by the group plus a couple of radial
+// tweaks. Wythoff's construction instead places a single seed point inside the
+// fundamental triangle and takes its orbit as the vertex set, which sweeps out
+// the whole uniform family continuously as the seed moves:
+//
+//   seed at a corner        -> the Platonic solids
+//   seed on an edge         -> the truncations, and the rectified solids at
+//                              the point equidistant from both ends
+//   seed strictly inside    -> the omnitruncated solid
+//
+// The faces are the rings of orbit points around each rotation axis. Around
+// the axis through corner k the ring lies in the plane x . c_k = seed . c_k —
+// every ring point is the seed moved by something that fixes c_k, so they all
+// share that dot product — which makes the face exactly planar with c_k as its
+// outward normal, no cross products needed.
+//
+// None of that needs the rings to be assembled explicitly. Fanning each face
+// from its centre and splitting every fan triangle where it crosses a mirror
+// leaves 6|G| triangles, each lying wholly inside one fundamental domain, and
+// each a copy of one of six triangles in the base domain. So the whole mesh is
+// the existing sweep with six triangles in place of one, and the six are:
+//
+//   (face centre on c_k, seed, foot of the seed on a mirror through c_k)
+//
+// for each corner k and each of the two mirrors meeting there. The polyhedron's
+// edges fall out the same way: the ring neighbours of the seed are its
+// reflections, so three base segments sweep to every edge and nothing else.
+
+
+const DEFAULT_DECIMALS = 3;
+// Corner k is where the two mirrors that are not k meet, so it lies in both of
+// their planes and is fixed by both reflections. Signs are settled against
+// corner 0 so all three bound the same fundamental triangle rather than three
+// scattered antipodes.
+function triangle_corners(mirrors) {
+    const corners = [0, 1, 2].map(k => (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.normalize)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.cross)(mirrors[(k + 1) % 3], mirrors[(k + 2) % 3])));
+    for (let k = 1; k < 3; k++) {
+        if ((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.dot)(corners[k], corners[0]) < 0)
+            corners[k] = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(corners[k], -1);
+    }
+    return corners;
+}
+// Barycentric weights on the fundamental triangle, placed on the unit sphere.
+// Mirror k is perpendicular to the two corners that lie in it, so a point's
+// weight on corner k is just how far it stands off mirror k.
+function seed_point(mirrors, corners, barycentric) {
+    const [b0, b1, b2] = barycentric;
+    const sum = b0 + b1 + b2;
+    const w = sum > 0 ? [b0 / sum, b1 / sum, b2 / sum] : [1, 0, 0];
+    return (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.normalize)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.add)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.add)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(corners[0], w[0]), (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(corners[1], w[1])), (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(corners[2], w[2])));
+}
+function barycentric_of(mirrors, corners, p) {
+    const raw = [0, 1, 2].map(k => (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.dot)(p, mirrors[k]) / (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.dot)(corners[k], mirrors[k]));
+    const sum = raw[0] + raw[1] + raw[2];
+    const d = sum !== 0 ? sum : 1;
+    return [raw[0] / d, raw[1] / d, raw[2] / d];
+}
+// Matches the UV corners transformations_to_mesh assigns its one triangle:
+// corner 0 -> (0,0), corner 1 -> (0,1), corner 2 -> (1,0). Mapping through the
+// barycentric coordinates lands every piece of every face on the part of the
+// texture its own place in the fundamental domain calls for, so one drawing
+// still tiles the whole solid.
+function corner_uv(barycentric) {
+    return [barycentric[2], barycentric[1]];
+}
+// The six triangles the seed cuts the fundamental domain into, plus the three
+// segments that become the solid's edges.
+function wythoff_cell(mirrors, barycentric, factor = 1.0) {
+    const corners = triangle_corners(mirrors);
+    const seed = seed_point(mirrors, corners, barycentric);
+    const reflections = mirrors.map(_geometry__WEBPACK_IMPORTED_MODULE_1__.perpendicular_to_mirror_matrix);
+    // Every point here is the seed, a midpoint of it, or a retraction of a unit
+    // corner, so the seed is always the farthest out.
+    const s = factor / ((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.norm)(seed) || 1);
+    const triangles = [];
+    for (let k = 0; k < 3; k++) {
+        // The face around corner k sits in the plane x . c_k = seed . c_k, and
+        // its centre is where that plane crosses the axis.
+        const height = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.dot)(seed, corners[k]);
+        const centre = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(corners[k], height);
+        for (const m of [(k + 1) % 3, (k + 2) % 3]) {
+            // Halfway to the reflected seed, i.e. the foot of the seed on
+            // mirror m — where the fan triangle crosses into the next domain.
+            const foot = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.add)(seed, (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.mat_apply)(reflections[m], seed)), 0.5);
+            const points = [centre, seed, foot];
+            triangles.push({
+                points: points.map(p => (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(p, s)),
+                normal: corners[k],
+                uvs: points.map(p => corner_uv(barycentric_of(mirrors, corners, p)))
+            });
+        }
+    }
+    // A ring neighbour of the seed is one of its reflections, so these three
+    // segments sweep to every edge of the solid and to nothing else. A seed
+    // sitting on mirror m collapses that segment to a point, which is exactly
+    // the edge vanishing as the truncation closes up.
+    const edges = mirrors.map((_, m) => [(0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)(seed, s), (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.scale)((0,_linalg__WEBPACK_IMPORTED_MODULE_0__.mat_apply)(reflections[m], seed), s)]);
+    return { triangles, edges };
+}
+function wythoff_mesh(mirrors, transformations, options = {}) {
+    const { seed = [1, 1, 1], factor = 1.0, mirror_factor = 1.0, number_of_rays = 50, include_mirrors = true, decimals = DEFAULT_DECIMALS, round = true } = options;
+    const q = round ? (v) => (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.round_to)(v, decimals) : (v) => v;
+    const { triangles } = wythoff_cell(mirrors, seed, factor);
+    const vertices = [];
+    const normals = [];
+    const texture = [];
+    for (const transformation of transformations) {
+        for (const triangle of triangles) {
+            for (const p of triangle.points) {
+                const t = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.mat_apply)(transformation, p);
+                vertices.push(q(t[0]), q(t[1]), q(t[2]));
+            }
+            const n = (0,_linalg__WEBPACK_IMPORTED_MODULE_0__.mat_apply)(transformation, triangle.normal);
+            const rn = [q(n[0]), q(n[1]), q(n[2])];
+            normals.push(...rn, ...rn, ...rn);
+            for (const uv of triangle.uvs)
+                texture.push(uv[0], uv[1]);
+        }
+    }
+    const model = { vertices, normals, texture };
+    if (include_mirrors) {
+        const { mesh, normals: mesh_normals } = (0,_geometry__WEBPACK_IMPORTED_MODULE_1__.build_mirror_mesh)(mirrors, transformations, number_of_rays, mirror_factor);
+        model.mirrors = round ? mesh.map(q) : mesh;
+        model.mirror_normals = round ? mesh_normals.map(q) : mesh_normals;
+    }
+    return model;
+}
+function wythoff_edges(mirrors, transformations, options = {}) {
+    const { seed = [1, 1, 1], factor = 1.0 } = options;
+    const { edges } = wythoff_cell(mirrors, seed, factor);
+    const starts = [];
+    const ends = [];
+    for (const transformation of transformations) {
+        for (const [a, b] of edges) {
+            starts.push(...(0,_linalg__WEBPACK_IMPORTED_MODULE_0__.mat_apply)(transformation, a));
+            ends.push(...(0,_linalg__WEBPACK_IMPORTED_MODULE_0__.mat_apply)(transformation, b));
+        }
+    }
+    return { starts, ends };
+}
 
 
 /***/ },
@@ -6144,14 +7360,46 @@ void main(void) {
 
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   DEFAULT_WIREFRAME_OPTIONS: () => (/* binding */ DEFAULT_WIREFRAME_OPTIONS),
 /* harmony export */   WebglRenderer: () => (/* binding */ WebglRenderer)
 /* harmony export */ });
 /* harmony import */ var three__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! three */ "./node_modules/three/build/three.module.js");
 /* harmony import */ var _glsl__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./glsl */ "./src/ts/glsl.ts");
 /* harmony import */ var _webgl_utils__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./webgl_utils */ "./src/ts/webgl_utils.ts");
+/* harmony import */ var _wireframe__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./wireframe */ "./src/ts/wireframe.ts");
 
 
 
+
+const DEFAULT_WIREFRAME_OPTIONS = {
+    flat: false,
+    halo: true,
+    w_min: 0.25,
+    w_max: 3.0,
+    halo_px: 4.0,
+    halo_gain: 1.5,
+    color: [0.93, 0.95, 0.98],
+    opacity: 1.0,
+    ink_gamma: 2.2,
+    hide_back: false,
+};
+// Uniforms common to both wireframe passes, plus the per-pass extras.
+function wireframe_uniforms(extra) {
+    return {
+        projector: { value: null },
+        model_transformer: { value: null },
+        uViewport: { value: new three__WEBPACK_IMPORTED_MODULE_0__.Vector2(1, 1) },
+        uWMin: { value: 0.25 },
+        uWMax: { value: 3.0 },
+        uInkNear: { value: _webgl_utils__WEBPACK_IMPORTED_MODULE_2__.CAMERA_DISTANCE - 1 },
+        uInkFar: { value: _webgl_utils__WEBPACK_IMPORTED_MODULE_2__.CAMERA_DISTANCE + 1 },
+        uFlat: { value: 0.0 },
+        uPad: { value: 0.0 },
+        uClipNear: { value: _webgl_utils__WEBPACK_IMPORTED_MODULE_2__.CLIP_NEAR },
+        uClipFar: { value: _webgl_utils__WEBPACK_IMPORTED_MODULE_2__.CLIP_FAR },
+        ...extra,
+    };
+}
 // WebglRenderer: Stateful bridge using Three.js WebGLRenderer
 // webgl_utils provides geometry/texture helpers; this class owns the scene lifecycle
 class WebglRenderer {
@@ -6162,6 +7410,9 @@ class WebglRenderer {
         this.cached_model_geo = null;
         this.cached_mirrors_verts = null;
         this.cached_mirrors_geo = null;
+        this.cached_wire_model = null;
+        this.cached_wire_edges = null;
+        this.cached_wire_geo = null;
         this.texture_canvas = texture_canvas;
         this.renderer = new three__WEBPACK_IMPORTED_MODULE_0__.WebGLRenderer({ canvas: main_canvas, alpha: true, preserveDrawingBuffer: preserve_buffer });
         this.renderer.autoClear = false;
@@ -6210,6 +7461,40 @@ class WebglRenderer {
             side: three__WEBPACK_IMPORTED_MODULE_0__.DoubleSide,
             blending: three__WEBPACK_IMPORTED_MODULE_0__.NormalBlending,
         });
+        this.wireframe_material = new three__WEBPACK_IMPORTED_MODULE_0__.RawShaderMaterial({
+            vertexShader: _glsl__WEBPACK_IMPORTED_MODULE_1__.VS_SOURCE_WIREFRAME,
+            fragmentShader: _glsl__WEBPACK_IMPORTED_MODULE_1__.FS_SOURCE_WIREFRAME,
+            uniforms: wireframe_uniforms({
+                uColor: { value: new three__WEBPACK_IMPORTED_MODULE_0__.Vector3(0.13, 0.13, 0.13) },
+                uOpacity: { value: 1.0 },
+                uLineBias: { value: 0.0 },
+                uInkGamma: { value: 2.2 },
+                uInkOnDark: { value: 1.0 },
+            }),
+            glslVersion: three__WEBPACK_IMPORTED_MODULE_0__.GLSL3,
+            transparent: true,
+            // The halo prepass already carries occlusion; leaving depth writes off
+            // keeps the translucent sub-pixel edges order-independent.
+            depthTest: true,
+            depthWrite: false,
+            side: three__WEBPACK_IMPORTED_MODULE_0__.DoubleSide,
+            premultipliedAlpha: true,
+        });
+        this.wireframe_halo_material = new three__WEBPACK_IMPORTED_MODULE_0__.RawShaderMaterial({
+            vertexShader: _glsl__WEBPACK_IMPORTED_MODULE_1__.VS_SOURCE_WIREFRAME,
+            fragmentShader: _glsl__WEBPACK_IMPORTED_MODULE_1__.FS_SOURCE_WIREFRAME_HALO,
+            uniforms: wireframe_uniforms({
+                uHaloPx: { value: 4.0 },
+                uHaloEps: { value: 0.0 },
+                uHaloSlope: { value: 0.0 },
+            }),
+            glslVersion: three__WEBPACK_IMPORTED_MODULE_0__.GLSL3,
+            transparent: false,
+            depthTest: true,
+            depthWrite: true,
+            side: three__WEBPACK_IMPORTED_MODULE_0__.DoubleSide,
+        });
+        this.wireframe_halo_material.colorWrite = false;
         this.scene = new three__WEBPACK_IMPORTED_MODULE_0__.Scene();
         // Identity camera - projection is handled entirely by the 'projector' uniform
         this.camera = new three__WEBPACK_IMPORTED_MODULE_0__.Camera();
@@ -6248,23 +7533,99 @@ class WebglRenderer {
             }
         }
     }
-    draw_model(model, uniforms) {
-        this.apply_uniforms(this.main_material, uniforms);
+    // Refreshes `geo` in place where the layout allows it, so a model that is
+    // being regenerated every frame does not churn a new BufferGeometry each
+    // time; rebuilds otherwise.
+    refresh_geometry(geo, model) {
+        if (geo && (0,_webgl_utils__WEBPACK_IMPORTED_MODULE_2__.update_geometry_in_place)(geo, model))
+            return geo;
+        geo?.dispose();
+        return (0,_webgl_utils__WEBPACK_IMPORTED_MODULE_2__.model_to_geometry)(model);
+    }
+    model_geometry(model) {
         if (this.cached_model !== model) {
-            this.cached_model_geo?.dispose();
-            this.cached_model_geo = (0,_webgl_utils__WEBPACK_IMPORTED_MODULE_2__.model_to_geometry)(model);
+            this.cached_model_geo = this.refresh_geometry(this.cached_model_geo, model);
             this.cached_model = model;
         }
-        this.render_pass(this.cached_model_geo, this.main_material, false);
+        return this.cached_model_geo;
+    }
+    draw_model(model, uniforms) {
+        this.apply_uniforms(this.main_material, uniforms);
+        this.render_pass(this.model_geometry(model), this.main_material, false);
+    }
+    // Lay the solid into the depth buffer without drawing it, so a wireframe
+    // rendered afterwards is occluded by the surface it belongs to.
+    draw_model_depth_only(model, uniforms) {
+        this.apply_uniforms(this.main_material, uniforms);
+        const geometry = this.model_geometry(model);
+        this.main_material.colorWrite = false;
+        this.render_pass(geometry, this.main_material, false);
+        this.main_material.colorWrite = true;
     }
     draw_mirrors(model, uniforms) {
         this.apply_uniforms(this.mirror_material, uniforms);
         if (this.cached_mirrors_verts !== model.vertices) {
-            this.cached_mirrors_geo?.dispose();
-            this.cached_mirrors_geo = (0,_webgl_utils__WEBPACK_IMPORTED_MODULE_2__.model_to_geometry)(model);
+            this.cached_mirrors_geo = this.refresh_geometry(this.cached_mirrors_geo, model);
             this.cached_mirrors_verts = model.vertices;
         }
         this.render_pass(this.cached_mirrors_geo, this.mirror_material, false);
+    }
+    // Depth-weighted wireframe. Draws feature edges as instanced screen-space
+    // quads whose weight falls off with depth, optionally preceded by a depth-only
+    // halo prepass that cuts the farther line at every crossing.
+    draw_wireframe(model, uniforms, options, source) {
+        if (this.cached_wire_model !== model) {
+            this.cached_wire_geo?.dispose();
+            this.cached_wire_edges = (0,_wireframe__WEBPACK_IMPORTED_MODULE_3__.extract_edges)(source);
+            this.cached_wire_geo = (0,_wireframe__WEBPACK_IMPORTED_MODULE_3__.edges_to_geometry)(this.cached_wire_edges);
+            this.cached_wire_model = model;
+        }
+        const edges = this.cached_wire_edges;
+        if (edges.count === 0)
+            return;
+        // The model spins about the origin, so its depth range is fixed by its
+        // radius whatever the rotation.
+        const ink_near = _webgl_utils__WEBPACK_IMPORTED_MODULE_2__.CAMERA_DISTANCE - edges.radius;
+        const ink_far = _webgl_utils__WEBPACK_IMPORTED_MODULE_2__.CAMERA_DISTANCE + edges.radius;
+        const depth_range = ink_far - ink_near;
+        const canvas = this.renderer.domElement;
+        const halo_reach = options.halo ? options.halo_px : 0;
+        const shared = (material, pad) => {
+            this.apply_uniforms(material, uniforms);
+            const u = material.uniforms;
+            u.uViewport.value.set(canvas.width, canvas.height);
+            u.uWMin.value = options.w_min;
+            u.uWMax.value = options.w_max;
+            u.uInkNear.value = ink_near;
+            u.uInkFar.value = ink_far;
+            u.uFlat.value = options.flat ? 1.0 : 0.0;
+            u.uPad.value = pad;
+        };
+        if (options.halo) {
+            const h = this.wireframe_halo_material;
+            shared(h, halo_reach);
+            h.uniforms.uHaloPx.value = options.halo_px;
+            // Enough to let edges meeting at a shared corner through, and small
+            // against the model's depth range so it costs no real separation.
+            h.uniforms.uHaloEps.value = 0.02 * edges.radius;
+            // Matches the doc's extra = gain * dz_normalized * 10 px, inverted into
+            // view units of separation per pixel of gap.
+            h.uniforms.uHaloSlope.value =
+                options.halo_gain > 0 ? depth_range / (10 * options.halo_gain) : 0.0;
+            this.render_pass(this.cached_wire_geo, h, false);
+        }
+        const m = this.wireframe_material;
+        shared(m, 0);
+        m.uniforms.uColor.value.set(options.color[0], options.color[1], options.color[2]);
+        m.uniforms.uOpacity.value = options.opacity;
+        // Pull the lines a hair toward the camera so they win against the solid
+        // faces they sit on, and against their own halo skirt.
+        m.uniforms.uLineBias.value = 0.01 * edges.radius;
+        m.uniforms.uInkGamma.value = Math.max(options.ink_gamma, 1.0);
+        const luminance = 0.2126 * options.color[0] + 0.7152 * options.color[1]
+            + 0.0722 * options.color[2];
+        m.uniforms.uInkOnDark.value = luminance > 0.5 ? 1.0 : 0.0;
+        this.render_pass(this.cached_wire_geo, m, false);
     }
     draw_overlay(model, uniforms) {
         this.apply_uniforms(this.overlay_material, uniforms);
@@ -6283,10 +7644,17 @@ class WebglRenderer {
 
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   CAMERA_DISTANCE: () => (/* binding */ CAMERA_DISTANCE),
+/* harmony export */   CAMERA_EYE: () => (/* binding */ CAMERA_EYE),
+/* harmony export */   CAMERA_TARGET: () => (/* binding */ CAMERA_TARGET),
+/* harmony export */   CLIP_FAR: () => (/* binding */ CLIP_FAR),
+/* harmony export */   CLIP_NEAR: () => (/* binding */ CLIP_NEAR),
+/* harmony export */   FOV_Y: () => (/* binding */ FOV_Y),
 /* harmony export */   create_canvas_texture: () => (/* binding */ create_canvas_texture),
 /* harmony export */   matrix_uniforms: () => (/* binding */ matrix_uniforms),
 /* harmony export */   model_to_geometry: () => (/* binding */ model_to_geometry),
-/* harmony export */   pick_uv: () => (/* binding */ pick_uv)
+/* harmony export */   pick_uv: () => (/* binding */ pick_uv),
+/* harmony export */   update_geometry_in_place: () => (/* binding */ update_geometry_in_place)
 /* harmony export */ });
 /* harmony import */ var three__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! three */ "./node_modules/three/build/three.module.js");
 /* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/mat3.js");
@@ -6362,13 +7730,21 @@ function pick_uv(css_x, css_y, css_width, css_height, texture_width, texture_hei
     }
     return best_uv;
 }
+// Camera constants. The wireframe pass needs these to turn a fragment's view
+// depth back into a window depth, and to size the ink ramp to the model.
+const CAMERA_EYE = [0, -.1, 5];
+const CAMERA_TARGET = [0, -.1, 0];
+const CAMERA_DISTANCE = Math.hypot(CAMERA_EYE[0] - CAMERA_TARGET[0], CAMERA_EYE[1] - CAMERA_TARGET[1], CAMERA_EYE[2] - CAMERA_TARGET[2]);
+const CLIP_NEAR = 1.0;
+const CLIP_FAR = 10.0;
+const FOV_Y = Math.PI * 0.15;
 function matrix_uniforms(rotation) {
     const rotation_matrix_4x4 = gl_matrix__WEBPACK_IMPORTED_MODULE_2__.create();
     gl_matrix__WEBPACK_IMPORTED_MODULE_2__.fromQuat(rotation_matrix_4x4, rotation);
     const viewMatrix = gl_matrix__WEBPACK_IMPORTED_MODULE_2__.create();
-    gl_matrix__WEBPACK_IMPORTED_MODULE_2__.lookAt(viewMatrix, [0, -.1, 5], [0, -.1, 0], [0, 1, 0]);
+    gl_matrix__WEBPACK_IMPORTED_MODULE_2__.lookAt(viewMatrix, CAMERA_EYE, CAMERA_TARGET, [0, 1, 0]);
     const projectionMatrix = gl_matrix__WEBPACK_IMPORTED_MODULE_2__.create();
-    gl_matrix__WEBPACK_IMPORTED_MODULE_2__.perspective(projectionMatrix, Math.PI * 0.15, 1, 1, 10.0);
+    gl_matrix__WEBPACK_IMPORTED_MODULE_2__.perspective(projectionMatrix, FOV_Y, 1, CLIP_NEAR, CLIP_FAR);
     gl_matrix__WEBPACK_IMPORTED_MODULE_2__.multiply(projectionMatrix, projectionMatrix, viewMatrix);
     const rotationMatrix3x3 = gl_matrix__WEBPACK_IMPORTED_MODULE_1__.create();
     gl_matrix__WEBPACK_IMPORTED_MODULE_1__.fromMat4(rotationMatrix3x3, rotation_matrix_4x4);
@@ -6383,20 +7759,48 @@ function matrix_uniforms(rotation) {
         },
     };
 }
+// Attribute name, item size, and where the model keeps the data.
+const MODEL_ATTRIBUTES = [
+    ['aVertexPosition', 3, model => model.vertices],
+    ['aNormalDirection', 3, model => model.normals],
+    ['aTextureCoord', 2, model => model.texture],
+    ['aVertexColor', 4, model => model.colors],
+];
 function model_to_geometry(model) {
     const geometry = new three__WEBPACK_IMPORTED_MODULE_0__.BufferGeometry();
     geometry.setDrawRange(0, Math.floor(model.vertices.length / 3));
-    geometry.setAttribute('aVertexPosition', new three__WEBPACK_IMPORTED_MODULE_0__.BufferAttribute(new Float32Array(model.vertices), 3));
-    if (model.normals) {
-        geometry.setAttribute('aNormalDirection', new three__WEBPACK_IMPORTED_MODULE_0__.BufferAttribute(new Float32Array(model.normals), 3));
-    }
-    if (model.texture) {
-        geometry.setAttribute('aTextureCoord', new three__WEBPACK_IMPORTED_MODULE_0__.BufferAttribute(new Float32Array(model.texture), 2));
-    }
-    if (model.colors) {
-        geometry.setAttribute('aVertexColor', new three__WEBPACK_IMPORTED_MODULE_0__.BufferAttribute(new Float32Array(model.colors), 4));
+    for (const [name, item_size, pick] of MODEL_ATTRIBUTES) {
+        const source = pick(model);
+        if (!source)
+            continue;
+        geometry.setAttribute(name, new three__WEBPACK_IMPORTED_MODULE_0__.BufferAttribute(new Float32Array(source), item_size));
     }
     return geometry;
+}
+// Overwrite a geometry's attributes from a model of the same shape, instead of
+// allocating a new one. A shape control being dragged regenerates the model
+// every frame, and for a fixed symmetry family the buffer lengths never change
+// — only the numbers in them. Returns false when the layouts differ and the
+// caller has to rebuild.
+function update_geometry_in_place(geometry, model) {
+    for (const [name, , pick] of MODEL_ATTRIBUTES) {
+        const source = pick(model);
+        const attribute = geometry.getAttribute(name);
+        if (!source !== !attribute)
+            return false;
+        if (source && attribute && attribute.array.length !== source.length)
+            return false;
+    }
+    for (const [name, , pick] of MODEL_ATTRIBUTES) {
+        const source = pick(model);
+        if (!source)
+            continue;
+        const attribute = geometry.getAttribute(name);
+        attribute.array.set(source);
+        attribute.needsUpdate = true;
+    }
+    geometry.setDrawRange(0, Math.floor(model.vertices.length / 3));
+    return true;
 }
 function create_canvas_texture(texture_canvas) {
     const texture = new three__WEBPACK_IMPORTED_MODULE_0__.CanvasTexture(texture_canvas);
@@ -6406,6 +7810,171 @@ function create_canvas_texture(texture_canvas) {
     texture.minFilter = three__WEBPACK_IMPORTED_MODULE_0__.LinearFilter;
     texture.magFilter = three__WEBPACK_IMPORTED_MODULE_0__.LinearFilter;
     return texture;
+}
+
+
+/***/ },
+
+/***/ "./src/ts/wireframe.ts"
+/*!*****************************!*\
+  !*** ./src/ts/wireframe.ts ***!
+  \*****************************/
+(__unused_webpack_module, __webpack_exports__, __webpack_require__) {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   edges_to_geometry: () => (/* binding */ edges_to_geometry),
+/* harmony export */   extract_edges: () => (/* binding */ extract_edges)
+/* harmony export */ });
+/* harmony import */ var three__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! three */ "./node_modules/three/build/three.module.js");
+/* harmony import */ var _symmetry__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./symmetry */ "./src/ts/symmetry/index.ts");
+
+
+// Wireframe edge extraction.
+//
+// Models are triangle soups whose faces are triangulated (and subdivided), so a
+// naive "draw every triangle edge" wireframe shows the tessellation rather than
+// the polyhedron. Only the *feature* edges belong in a wireframe.
+//
+// Every model is generated, so the edges come from the symmetry group rather
+// than from measuring the mesh: each triangle is a copy of one in the base
+// domain, which settles the whole solid exactly — see crease_slots() and
+// transformations_to_edges() in symmetry/geometry.ts, and wythoff_edges() for
+// the seed-point path. Afterwards the collinear runs that face subdivision
+// left behind are welded back into single segments.
+const QUANT = 1e5; // vertex welding precision
+const COLLINEAR_COS = Math.cos(Math.PI / 180);
+function extract_edges(source) {
+    if (typeof source === 'string') {
+        if ((0,_symmetry__WEBPACK_IMPORTED_MODULE_1__.is_generated_model)(source)) {
+            return edges_from_symmetry((0,_symmetry__WEBPACK_IMPORTED_MODULE_1__.generate_edges)(source));
+        }
+    }
+    else if (source) {
+        return edges_from_symmetry((0,_symmetry__WEBPACK_IMPORTED_MODULE_1__.generate_edges_from_spec)(source));
+    }
+    // No generator behind this model: nothing to draw rather than a guess.
+    return { starts: new Float32Array(0), ends: new Float32Array(0), count: 0, radius: 1 };
+}
+// Edges swept from the fundamental triangle's crease slots. Each one arrives
+// twice (once from the triangle on either side), so they still need welding and
+// deduping — but nothing here is a judgement call about which edges are real.
+function edges_from_symmetry(swept) {
+    const { starts, ends } = swept;
+    const points = [];
+    const ids = new Map();
+    let radius = 0;
+    const id_of = (xs, i) => {
+        const x = xs[i], y = xs[i + 1], z = xs[i + 2];
+        const key = `${Math.round(x * QUANT)},${Math.round(y * QUANT)},${Math.round(z * QUANT)}`;
+        let id = ids.get(key);
+        if (id === undefined) {
+            id = points.length;
+            points.push([x, y, z]);
+            ids.set(key, id);
+            radius = Math.max(radius, Math.hypot(x, y, z));
+        }
+        return id;
+    };
+    const seen = new Set();
+    const pairs = [];
+    for (let i = 0; i < starts.length; i += 3) {
+        const a = id_of(starts, i), b = id_of(ends, i);
+        if (a === b)
+            continue;
+        const lo = Math.min(a, b), hi = Math.max(a, b);
+        const key = lo * 100003 + hi;
+        if (seen.has(key))
+            continue; // the neighbouring triangle's copy
+        seen.add(key);
+        pairs.push([lo, hi]);
+    }
+    return to_edge_set(weld_collinear(pairs, points), points, radius);
+}
+// Flatten index pairs into the instanced-attribute layout.
+function to_edge_set(pairs, points, radius) {
+    const count = pairs.length;
+    const starts = new Float32Array(count * 3);
+    const ends = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+        const [a, b] = pairs[i];
+        starts[i * 3] = points[a][0];
+        starts[i * 3 + 1] = points[a][1];
+        starts[i * 3 + 2] = points[a][2];
+        ends[i * 3] = points[b][0];
+        ends[i * 3 + 1] = points[b][1];
+        ends[i * 3 + 2] = points[b][2];
+    }
+    return { starts, ends, count, radius: radius || 1 };
+}
+// Subdivision splits one polyhedron edge into several collinear segments. Join
+// runs of them back together: a halo pass cuts gaps wherever edges cross, and
+// an interior joint between two segments reads as a spurious crossing.
+function weld_collinear(edges, points) {
+    const incident = new Map();
+    for (let i = 0; i < edges.length; i++) {
+        for (const p of edges[i]) {
+            let list = incident.get(p);
+            if (!list) {
+                list = [];
+                incident.set(p, list);
+            }
+            list.push(i);
+        }
+    }
+    const dir_of = (e) => {
+        const a = points[e[0]], b = points[e[1]];
+        const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        const l = Math.hypot(d[0], d[1], d[2]) || 1;
+        return [d[0] / l, d[1] / l, d[2] / l];
+    };
+    const alive = edges.map(() => true);
+    const current = edges.map(e => [...e]);
+    // Repeatedly collapse any vertex joining exactly two collinear edges
+    let changed = true;
+    while (changed) {
+        changed = false;
+        for (const [p, list] of incident) {
+            const live = list.filter(i => alive[i] && (current[i][0] === p || current[i][1] === p));
+            if (live.length !== 2)
+                continue;
+            const [i, j] = live;
+            const di = dir_of(current[i]), dj = dir_of(current[j]);
+            const dot = Math.abs(di[0] * dj[0] + di[1] * dj[1] + di[2] * dj[2]);
+            if (dot < COLLINEAR_COS)
+                continue;
+            // Splice j onto i, dropping the shared vertex p
+            const other_i = current[i][0] === p ? current[i][1] : current[i][0];
+            const other_j = current[j][0] === p ? current[j][1] : current[j][0];
+            if (other_i === other_j)
+                continue; // closed 2-edge loop; leave it alone
+            current[i] = [other_i, other_j];
+            alive[j] = false;
+            const list_i = incident.get(other_j);
+            if (list_i)
+                list_i.push(i);
+            changed = true;
+        }
+    }
+    return current.filter((_, i) => alive[i]);
+}
+// A 1x1 quad, instanced once per edge. aCorner.x is the lateral side (-1/+1),
+// aCorner.y selects the endpoint (0 = start, 1 = end).
+const QUAD_CORNERS = new Float32Array([
+    -1, 0, 1, 0, 1, 1,
+    -1, 0, 1, 1, -1, 1,
+]);
+function edges_to_geometry(edges) {
+    const geometry = new three__WEBPACK_IMPORTED_MODULE_0__.InstancedBufferGeometry();
+    // There is no 'position' attribute to infer a vertex count from, so the draw
+    // range has to say how long the base quad is — same reason model_to_geometry
+    // sets one.
+    geometry.setDrawRange(0, QUAD_CORNERS.length / 2);
+    geometry.setAttribute('aCorner', new three__WEBPACK_IMPORTED_MODULE_0__.BufferAttribute(QUAD_CORNERS, 2));
+    geometry.setAttribute('aStart', new three__WEBPACK_IMPORTED_MODULE_0__.InstancedBufferAttribute(edges.starts, 3));
+    geometry.setAttribute('aEnd', new three__WEBPACK_IMPORTED_MODULE_0__.InstancedBufferAttribute(edges.ends, 3));
+    geometry.instanceCount = edges.count;
+    return geometry;
 }
 
 
@@ -59955,7 +61524,6 @@ var __webpack_exports__ = {};
 __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _app__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./app */ "./src/ts/app.ts");
 
-localStorage.clear();
 window.addEventListener('load', () => {
     const app = new _app__WEBPACK_IMPORTED_MODULE_0__.App('stellated_dodecahedron');
     app.init();

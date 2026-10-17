@@ -18,6 +18,7 @@
 <html>
 
 <head>
+  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Museum of polyhedra</title>
   <link type="text/css" rel="stylesheet" href="static/style.css">
@@ -48,6 +49,14 @@
       <rect x="11" y="2"  width="7" height="7" rx="1.5"/>
       <rect x="2"  y="11" width="7" height="7" rx="1.5"/>
       <rect x="11" y="11" width="7" height="7" rx="1.5"/>
+    </svg>
+  </button>
+
+  <!-- Floating wireframe toggle -->
+  <button id="wireframe-btn" class="floating-btn" title="Wireframe mode">
+    <svg viewBox="0 0 20 20" fill="none" stroke="white" stroke-width="1.2" xmlns="http://www.w3.org/2000/svg">
+      <path d="M10 1.5 L18 6 L18 14 L10 18.5 L2 14 L2 6 Z"/>
+      <path d="M10 1.5 L10 18.5 M2 6 L18 14 M18 6 L2 14"/>
     </svg>
   </button>
 
@@ -121,6 +130,63 @@
         <div>
           <input type="radio" id="no-mirrors" name="mirrors" value="no-mirrors">
           <label for="no-mirrors">No mirrors</label>
+        </div>
+      </fieldset>
+      <fieldset id="shape-options">
+        <legend>Shape:</legend>
+        <div>
+          <input type="checkbox" id="shape-seed-on" name="shape-seed-on" value="shape-seed-on">
+          <label for="shape-seed-on">Seed point</label>
+        </div>
+        <div class="seed-sub">
+          <canvas id="shape-seed-pad"></canvas>
+          <div id="shape-seed-hint">Corners are the regular solids, edges the
+            truncations, the middle the omnitruncated one.</div>
+        </div>
+        <div class="slider-row classic-sub">
+          <label for="shape-stellation">Stellation</label>
+          <input type="range" id="shape-stellation" min="0.2" max="3" step="0.01" value="1">
+        </div>
+        <div class="slider-row">
+          <label for="shape-size">Size</label>
+          <input type="range" id="shape-size" min="0.3" max="1.6" step="0.01" value="1">
+        </div>
+        <div class="slider-row">
+          <label for="shape-mirror-size">Mirror size</label>
+          <input type="range" id="shape-mirror-size" min="0.3" max="1.6" step="0.01" value="1">
+        </div>
+        <div class="classic-sub">
+          <input type="checkbox" id="shape-dual" name="shape-dual" value="shape-dual">
+          <label for="shape-dual">Dual</label>
+        </div>
+        <div class="classic-sub">
+          <input type="checkbox" id="shape-rhombic" name="shape-rhombic" value="shape-rhombic">
+          <label for="shape-rhombic">Rhombic</label>
+        </div>
+        <div>
+          <button type="button" id="shape-reset">Reset shape</button>
+        </div>
+      </fieldset>
+      <fieldset id="wireframe-options">
+        <legend>Wireframe:</legend>
+        <div>
+          <input type="checkbox" id="wireframe" name="wireframe" value="wireframe">
+          <label for="wireframe">Wireframe</label>
+        </div>
+        <div class="wf-sub">
+          <select id="wireframe-mode">
+            <option value="uniform">Even lines</option>
+            <option value="depth">Nearer edges heavier</option>
+            <option value="depth-halo" selected>Nearer edges heavier + breaks</option>
+          </select>
+        </div>
+        <div class="wf-sub">
+          <input type="checkbox" id="wf-hide-back" name="wf-hide-back" value="wf-hide-back">
+          <label for="wf-hide-back">Hide edges round the back</label>
+        </div>
+        <div class="slider-row wf-sub">
+          <label for="wf-weight">Line weight</label>
+          <input type="range" id="wf-weight" min="0.4" max="2.5" step="0.1" value="1">
         </div>
       </fieldset>
     </div>
