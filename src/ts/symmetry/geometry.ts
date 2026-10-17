@@ -1,0 +1,292 @@
+// Port of ~/work/weekend/concepts/symmetry/utils/geometry.py — the Coxeter
+// kaleidoscope construction that generates Plato's polyhedra.
+//
+// Three mirror planes placed at angles pi/x, pi/y, pi/z generate a finite
+// reflection group. Enumerating the group orbit of a single fundamental
+// triangle tiles the whole solid.
+//
+// Quirks of the original are reproduced deliberately so the generated geometry
+// matches the JSON models that shipped before; each is called out below.
+
+import {
+    Mat3, Vec3, IDENTITY3,
+    cross, dot, norm, normalize, scale, subtract, negate,
+    mat_multiply, mat_apply, transpose, column, set_column,
+    squared_distance, round_to
+} from './linalg';
+
+export type GeneratedModel = {
+    vertices: number[],
+    normals: number[],
+    texture: number[],
+    mirrors?: number[],
+    mirror_normals?: number[]
+};
+
+const DEFAULT_DECIMALS = 3;
+const NORMAL_DECIMALS = 9; // distinct_normals rounds harder than everything else
+
+// UV corners of each fundamental triangle, as shipped in the JSON models.
+const TRIANGLE_UVS = [0, 0, 0, 1, 1, 0];
+
+// Unit normals of three mirror planes meeting at angles pi/x, pi/y, pi/z.
+export function place_mirrors(x: number, y: number, z: number): Vec3[] {
+    const a = Math.PI / x; // between mirrors 0 and 1
+    const b = Math.PI / y; // between mirrors 1 and 2
+    const c = Math.PI / z; // between mirrors 2 and 0
+    // Angle between the (2,0) and (2,1) intersection lines.
+    const C = Math.acos(
+        (Math.cos(c) - Math.cos(a) * Math.cos(b)) / (Math.sin(a) * Math.sin(b))
+    );
+    return [
+        [1, 0, 0],
+        [Math.cos(a), Math.sin(a), 0],
+        [Math.cos(b), Math.sin(b) * Math.cos(C), Math.sin(b) * Math.sin(C)]
+    ];
+}
+
+// Householder reflection I - 2pp^T for a unit perpendicular p.
+export function perpendicular_to_mirror_matrix(p: Vec3): Mat3 {
+    return [
+        1 - 2 * p[0] * p[0], -2 * p[1] * p[0], -2 * p[2] * p[0],
+        -2 * p[0] * p[1], 1 - 2 * p[1] * p[1], -2 * p[2] * p[1],
+        -2 * p[0] * p[2], -2 * p[1] * p[2], 1 - 2 * p[2] * p[2]
+    ];
+}
+
+// Keeps the first of each group of matrices within `threshold` (Frobenius) of
+// one another, preserving input order.
+export function fuzzy_unique(matrices: Mat3[], threshold = 10e-3): Mat3[] {
+    const limit = threshold * threshold;
+    const kept: Mat3[] = [];
+    for (const candidate of matrices) {
+        let duplicate = false;
+        for (const seen of kept) {
+            if (squared_distance(candidate, seen) < limit) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) kept.push(candidate);
+    }
+    return kept;
+}
+
+// Closure under left-multiplication by the mirrors, enumerating the group.
+export function mirror_matrices_to_group_transformations(mirror_matrices: Mat3[]): Mat3[] {
+    let transformations: Mat3[] = [IDENTITY3.slice()];
+    for (let iteration = 0; iteration < 20; iteration++) {
+        const applied: Mat3[] = [];
+        // Mirror-major order, matching numpy's (3, n, 3, 3) reshape.
+        for (const mirror of mirror_matrices) {
+            for (const transformation of transformations) {
+                applied.push(mat_multiply(mirror, transformation));
+            }
+        }
+        const next = fuzzy_unique(transformations.concat(applied));
+        if (next.length === transformations.length) return next;
+        transformations = next;
+    }
+    return transformations;
+}
+
+// Orthonormal basis whose first column is the given axis.
+export function unitary_matrix_from_left_column(left_column: Vec3): Mat3 {
+    const m: Mat3 = [
+        left_column[0], 0, 0,
+        left_column[1], 1, 0,
+        left_column[2], 0, 1
+    ];
+    set_column(m, 0, normalize(column(m, 0)));
+    const c0 = column(m, 0);
+    const c1 = column(m, 1);
+    set_column(m, 1, normalize(subtract(c1, scale(c0, dot(c0, c1)))));
+    set_column(m, 2, normalize(cross(column(m, 0), column(m, 1))));
+    return m;
+}
+
+// A plane and its opposite normal are the same plane, so normals are flipped
+// to a canonical orientation before dedup: first non-zero component positive.
+//
+// The original compared against exactly 0. Components that are zero in exact
+// arithmetic land on +-1e-17 in floating point, so that test branched
+// inconsistently and let n and -n through as two "distinct" planes — the
+// icosahedral group came out with 17 planes instead of 15, drawing two of the
+// mirror discs twice. Comparing against an epsilon (and snapping the noise to
+// zero) collapses those pairs. Pass `legacy_duplicate_planes` to get the old
+// 17-plane behaviour back; note it cannot be reproduced bit-for-bit, since
+// which of the two signs survives is pure float noise.
+const NORMAL_EPSILON = 1e-9;
+
+export function distinct_normals(
+    mirrors: Vec3[], transformations: Mat3[], legacy_duplicate_planes = false
+): Vec3[] {
+    const seen = new Map<string, Vec3>();
+    for (const transformation of transformations) {
+        for (const mirror of mirrors) {
+            const n = normalize(mat_apply(transformation, mirror));
+            let directed: Vec3;
+            if (legacy_duplicate_planes) {
+                if (n[0] < 0) directed = negate(n);
+                else if (n[0] === 0 && n[1] < 0) directed = negate(n);
+                else if (n[0] === 0 && n[1] === 0 && n[2] < 0) directed = negate(n);
+                else directed = n;
+            } else {
+                const snapped: Vec3 = [
+                    Math.abs(n[0]) < NORMAL_EPSILON ? 0 : n[0],
+                    Math.abs(n[1]) < NORMAL_EPSILON ? 0 : n[1],
+                    Math.abs(n[2]) < NORMAL_EPSILON ? 0 : n[2]
+                ];
+                const leading = snapped.find(c => c !== 0) ?? 0;
+                directed = leading < 0 ? negate(snapped) : snapped;
+            }
+            const rounded: Vec3 = [
+                round_to(directed[0], NORMAL_DECIMALS),
+                round_to(directed[1], NORMAL_DECIMALS),
+                round_to(directed[2], NORMAL_DECIMALS)
+            ];
+            const key = `${rounded[0]},${rounded[1]},${rounded[2]}`;
+            if (!seen.has(key)) seen.set(key, rounded);
+        }
+    }
+    return Array.from(seen.values());
+}
+
+// A disc perpendicular to `rotation_axis`, as a fan of `number_of_rays`
+// triangles, each (ray, rotated ray, origin). Returns flat xyz triplets.
+export function vector_to_perpendicular_circle(
+    rotation_axis: Vec3, number_of_rays: number
+): number[] {
+    const a = 2 * Math.PI / number_of_rays;
+    const base_rotator: Mat3 = [
+        1, 0, 0,
+        0, Math.cos(a), -Math.sin(a),
+        0, Math.sin(a), Math.cos(a)
+    ];
+    const m = unitary_matrix_from_left_column(rotation_axis);
+    const rotator = mat_multiply(mat_multiply(m, base_rotator), transpose(m));
+    const result: number[] = [];
+    let ray = column(m, 2);
+    for (let j = 0; j < number_of_rays; j++) {
+        const rotated = mat_apply(rotator, ray);
+        result.push(...normalize(ray));
+        result.push(...normalize(rotated));
+        result.push(0, 0, 0);
+        ray = rotated;
+    }
+    return result;
+}
+
+export function build_mirror_mesh(
+    mirrors: Vec3[], transformations: Mat3[], number_of_rays = 50, factor = 1,
+    legacy_duplicate_planes = false
+): { mesh: number[], normals: number[] } {
+    const normal_tuples = distinct_normals(mirrors, transformations, legacy_duplicate_planes);
+    const mesh: number[] = [];
+    const normals: number[] = [];
+    for (const normal of normal_tuples) {
+        const circle = vector_to_perpendicular_circle(normal, number_of_rays);
+        for (const value of circle) mesh.push(value * factor);
+        for (let i = 0; i < number_of_rays * 3; i++) {
+            normals.push(normal[0], normal[1], normal[2]);
+        }
+    }
+    return { mesh, normals };
+}
+
+export type MeshOptions = {
+    dual?: boolean,
+    stellated?: boolean,
+    rhombic?: boolean,
+    factor?: number,
+    mirror_factor?: number,
+    number_of_rays?: number,
+    include_mirrors?: boolean,
+    // Decimal places the output is rounded to, matching the shipped JSON.
+    decimals?: number,
+    // Extra triangles' worth of UVs emitted past the draw range; see below.
+    texture_padding?: number,
+    legacy_duplicate_planes?: boolean
+};
+
+// Builds the fundamental triangle and sweeps it through the whole group.
+export function transformations_to_mesh(
+    mirrors: Vec3[], transformations: Mat3[], options: MeshOptions = {}
+): GeneratedModel {
+    const {
+        dual = false,
+        stellated = false,
+        rhombic = false,
+        factor = 1.0,
+        mirror_factor = 1.0,
+        number_of_rays = 50,
+        include_mirrors = true,
+        decimals = DEFAULT_DECIMALS,
+        texture_padding = 18,
+        legacy_duplicate_planes = false
+    } = options;
+
+    const t = transformations.length;
+    const indices = dual ? [0, 2, 1] : [0, 1, 2];
+
+    const m1xm2 = normalize(cross(mirrors[indices[1]], mirrors[indices[2]]));
+    const m2xm0 = normalize(cross(mirrors[indices[2]], mirrors[indices[0]]));
+    // Quirk: reversed relative to its name — cross(m1, m0), not cross(m0, m1).
+    // This sets the triangle winding; flipping it inverts every face.
+    const m0xm1 = normalize(cross(mirrors[indices[1]], mirrors[indices[0]]));
+
+    let v0 = m1xm2;
+    let v1 = scale(m2xm0, 1 / dot(m2xm0, m1xm2));
+    // Quirk: v2 multiplies by the dot product where v1 divides; only the
+    // rhombic variant divides in both.
+    let v2 = rhombic
+        ? scale(m0xm1, 1 / dot(m0xm1, m1xm2))
+        : scale(m0xm1, dot(m0xm1, m1xm2));
+    if (stellated) v2 = scale(v2, 2);
+
+    const max_norm = Math.max(norm(v0), norm(v1), norm(v2));
+    v0 = scale(v0, factor / max_norm);
+    v1 = scale(v1, factor / max_norm);
+    v2 = scale(v2, factor / max_norm);
+
+    // Flat per-face normal, left unnormalised exactly as in the original.
+    const face_normal = cross(subtract(v0, v1), subtract(v0, v2));
+
+    const vertices: number[] = [];
+    const normals: number[] = [];
+    for (const transformation of transformations) {
+        for (const v of [v0, v1, v2]) {
+            const p = mat_apply(transformation, v);
+            vertices.push(
+                round_to(p[0], decimals),
+                round_to(p[1], decimals),
+                round_to(p[2], decimals)
+            );
+        }
+        const n = mat_apply(transformation, face_normal);
+        const rn: Vec3 = [
+            round_to(n[0], decimals),
+            round_to(n[1], decimals),
+            round_to(n[2], decimals)
+        ];
+        normals.push(...rn, ...rn, ...rn);
+    }
+
+    // Quirk: the shipped models emit t+18 triangles' worth of UVs rather than
+    // t, so the tail past the draw range is never read. Harmless, and kept so
+    // generated models stay comparable to the JSON they replace.
+    const texture: number[] = [];
+    for (let i = 0; i < t + texture_padding; i++) texture.push(...TRIANGLE_UVS);
+
+    const model: GeneratedModel = { vertices, normals, texture };
+
+    if (include_mirrors) {
+        const { mesh, normals: mesh_normals } = build_mirror_mesh(
+            mirrors, transformations, number_of_rays, mirror_factor,
+            legacy_duplicate_planes);
+        model.mirrors = mesh.map(v => round_to(v, decimals));
+        model.mirror_normals = mesh_normals.map(v => round_to(v, decimals));
+    }
+
+    return model;
+}

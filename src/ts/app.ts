@@ -1,6 +1,7 @@
 import * as Glsl from './glsl'
 import * as webgl_utils from './webgl_utils'
 import { WebglRenderer } from './webgl_renderer'
+import { generate_model, is_generated_model, GENERATED_MODEL_NAMES, SELECTABLE_MODEL_NAMES } from './symmetry'
 function parse_RGBA(color: string): [number, number, number, number] {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = 1;
@@ -117,19 +118,28 @@ export class App {
   construct_url_for_name(model_name: string): string {
     return `static/models/${model_name}.json`
   }
+  // Generated models are built on demand — enumerating a reflection group and
+  // sweeping its fundamental triangle costs a couple of milliseconds, less than
+  // parsing the JSON it replaces, so there is nothing worth caching. Only the
+  // hand-coloured legacy models still come off the network.
+  load_model_by_name(model_name: string, callback: (model: any) => void) {
+    if (is_generated_model(model_name)) {
+      callback(generate_model(model_name));
+      return
+    }
+    this.load_model(this.construct_url_for_name(model_name), callback);
+  }
   warmup_cache(model_names: string[]) {
     const _this = this;
     Array.from(model_names).forEach((model_name: string) => {
+      if (is_generated_model(model_name)) return
       _this.load_model(_this.construct_url_for_name(model_name), (model: any) => {
-        this.cache.setItem(model_name, JSON.stringify(model))
+        _this.cache.setItem(model_name, JSON.stringify(model))
       })
     })
   }
   load_spinner_model() {
-    const _this = this;
-    this.load_model(this.construct_url_for_name('spinner'), (model: any) => {
-      _this.spinner_model = model;
-    });
+    this.spinner_model = generate_model('spinner');
   }
   init() {
     const _this = this;
@@ -225,27 +235,16 @@ export class App {
       });
   }
   load_model_names(callback: (model_names: string[]) => void) {
-    const cache_key = 'model_list';
-    const cached = this.cache.getItem(cache_key);
-    if (cached) {
-      callback(JSON.parse(cached));
-      return
+    // The list used to be fetched from static/models/models.txt; it now comes
+    // from the model registry, so a stale cached copy cannot mask it. Entries
+    // cached back when these models were downloaded are dead weight against the
+    // localStorage quota, so drop them too.
+    this.cache.removeItem('model_list');
+    for (const model_name of GENERATED_MODEL_NAMES) {
+      this.cache.removeItem(model_name);
+      this.cache.removeItem(this.construct_url_for_name(model_name));
     }
-    fetch(`static/models/models.txt#'${Date.now()}`)
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`HTTP error! Status: ${response.status}`);
-        }
-        return response.text();
-      })
-      .then(data => {
-        const model_names = data.split(',');
-        this.cache.setItem(cache_key, JSON.stringify(model_names))
-        callback(model_names);
-      })
-      .catch(error => {
-        console.error('Error fetching data:', error); // Handle errors
-      });
+    callback(SELECTABLE_MODEL_NAMES.slice());
   }
 
   load_and_set_model(model_name: string, ready_callback: () => void) {
@@ -261,9 +260,11 @@ export class App {
     }
     //this.set_spinning_speed(.035);
     const _this = this
-    this.load_model(this.construct_url_for_name(model_name),
+    this.load_model_by_name(model_name,
       (model: any) => {
-        _this.cache.setItem(model_name, JSON.stringify(model));
+        if (!is_generated_model(model_name)) {
+          _this.cache.setItem(model_name, JSON.stringify(model));
+        }
         _this.set_model(model)
         ready_callback()
       })
@@ -397,8 +398,12 @@ export class App {
   // console.log(pen_size)
   // this.pen_pen_size = pen_size;
 
-  // Resolves with the model JSON, checking name-based cache first.
+  // Resolves with the model, generating it when possible and otherwise
+  // falling back to the name-based cache and then the network.
   load_model_promise(model_name: string): Promise<any> {
+    if (is_generated_model(model_name)) {
+      return Promise.resolve(generate_model(model_name));
+    }
     const cached = this.cache.getItem(model_name);
     if (cached) return Promise.resolve(JSON.parse(cached));
     return new Promise((resolve) => {

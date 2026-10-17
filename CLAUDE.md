@@ -5,12 +5,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# From the monorepo root (../):
+# From this directory (plato/ is self-contained — it has its own package.json
+# and node_modules; there is no package.json one level up):
 npm run build   # TypeScript type-checking (tsc -b)
 npm run bundle  # Webpack bundle — required for the app to pick up changes
 ```
 
-The HTML loads `../dist/plato/bundle.js` (webpack output). Running only `tsc -b` does **not** update the bundle.
+`index.html` loads `./bundle.js`, which webpack writes to this directory. Running only `tsc -b` does **not** update the bundle.
 
 ## Architecture
 
@@ -22,7 +23,14 @@ The HTML loads `../dist/plato/bundle.js` (webpack output). Running only `tsc -b`
 
 ### Core Modules
 
-**`src/ts/app.ts`** — Main application controller. Handles model loading, UI events, drawing with mirror symmetry, color/pen selection, and canvas lifecycle. Uses Vue 3 (minimal — just the model selector dropdown) and localStorage for caching loaded models.
+**`src/ts/app.ts`** — Main application controller. Handles model loading, UI events, drawing with mirror symmetry, color/pen selection, and canvas lifecycle. Uses Vue 3 (minimal — just the model selector dropdown). `load_model_by_name()` is the loading seam: generated models are built on the spot, and only the legacy coloured models are fetched and cached in localStorage.
+
+**`src/ts/symmetry/`** — Generates the polyhedra at runtime, replacing most of the JSON files that used to ship. A TypeScript port of the Python/jupytext notebooks in `~/work/weekend/concepts/symmetry/`.
+- `linalg.ts` — vec3 / row-major mat3 helpers.
+- `geometry.ts` — the Coxeter kaleidoscope construction: `place_mirrors()` positions three mirror planes at angles pi/x, pi/y, pi/z; `mirror_matrices_to_group_transformations()` closes the Householder reflections into the full group; `transformations_to_mesh()` sweeps one fundamental triangle through it; `build_mirror_mesh()` makes the cyan mirror-plane discs.
+- `models.ts` — per-model parameters (`MODEL_SPECS`), the picker's name list, and `generate_model()`. Reflection groups are enumerated once and cached per family.
+
+Output matches the JSON it replaced exactly — vertices, normals and UVs are byte-identical. The one deliberate difference is the mirror mesh: the original's sign-canonicalisation compared floats against exactly `0`, so near-zero components let a plane and its negation both through, drawing 2 of the icosahedral discs twice (17 blocks for 15 planes, 11 for 9, 7 for 6). The port compares against an epsilon and emits each plane once; pass `legacy_duplicate_planes` to restore the old behaviour.
 
 **`src/ts/webgl_renderer.ts`** — Wraps Three.js. Three rendering passes:
 1. `main_material` — 3D model with texture mapping
@@ -35,7 +43,7 @@ The HTML loads `../dist/plato/bundle.js` (webpack output). Running only `tsc -b`
 
 ### Model Format
 
-3D models live in `static/models/*.json`:
+Most models are generated at runtime by `src/ts/symmetry/`. Six legacy randomly-coloured variants (`dodecahedron`, `icosahedron`, `sellated_*`, `random_colored_st_*`) are not reproducible from the generator and still load from `static/models/*.json`. Both paths produce the same shape:
 ```typescript
 {
   vertices: number[],       // XYZ triplets
@@ -50,5 +58,6 @@ The HTML loads `../dist/plato/bundle.js` (webpack output). Running only `tsc -b`
 ### Dependencies
 - `three` — WebGL rendering abstraction
 - `gl-matrix` — 3D matrix/vector math
-- `@oded/tsutils` — local monorepo package (color parsing, floodfill)
+
+These are the only two runtime dependencies in `package.json`. `src/ts/symmetry/` deliberately uses its own small vec3/mat3 helpers rather than `gl-matrix`, so the port stays a close line-by-line match to the Python it came from.
 

@@ -12,7 +12,9 @@ export type Model = {
     vertices: Array<number>,
     colors?: Array<number>,
     normals?: Array<number>,
-    texture?: Array<number>
+    texture?: Array<number>,
+    mirrors?: Array<number>,
+    mirror_normals?: Array<number>
 }
 
 // Möller–Trumbore ray-triangle intersection.
