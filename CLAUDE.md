@@ -208,6 +208,53 @@ Output matches the JSON it replaced exactly — vertices, normals and UVs are by
 
 **`src/ts/webgl_utils.ts`** — Matrix math helpers (`gl-matrix`) and geometry conversion: `model_to_geometry()` converts a generated model → Three.js `BufferGeometry`, `matrix_uniforms()` computes projection/view/rotation matrices.
 
+**`src/ts/url_state.ts`** — The view in the address bar, so a picture can be
+linked to. The codec is pure — a flat record to a string and back, knowing
+nothing about the app — and `app.ts` holds the two halves that map it onto the
+controls: `url_snapshot()` reads, `apply_url_view()` / `apply_url_controls()`
+write.
+
+The drawing is not in it; a canvas does not fit in a URL. What is: the triple,
+the shape knobs (classic or seed), where the viewer stands (a quaternion for a
+solid, the view isometry for a tiling), the plane kernels' own settings, and
+what is drawn — model, mirrors, wireframe and its style.
+
+Four things keep it short and stable:
+
+1. **Only departures from the opening view are written**, compared on the
+   *encoded* text so a third that comes back as 0.3333 still counts as
+   untouched. `DEFAULT_URL_STATE` has to agree with the `stellated_dodecahedron`
+   preset and index.html's control defaults; the symptom of drift is a
+   redundant field in every link, not a wrong view.
+2. **Fields that do not apply are reported at their default**, which is the
+   same thing as being left out: a solid's link carries no pan, a tiling's no
+   rotation, and seed mode and the classic knobs each omit the other's
+   settings — the same split `regenerate_shape()` already makes.
+3. **One write hook, in `draw_model()`.** Nothing changes the picture without
+   asking for a frame, so no control needs to remember to save. The write is
+   `replaceState` (a drag must not fill the back button), at most one per
+   400ms, and skipped when the text is unchanged — WebKit rate-limits
+   replaceState at 100 per 30s and a pan is tens of changes a second.
+
+   The throttle writes on the **leading** edge. A trailing-only one is the
+   obvious thing and it loses state: a stream is the case where intermediate
+   values do not matter, but a one-off change — picking a group — is a single
+   event, and waiting out the window leaves the address bar describing the
+   view that was just left. Reloading inside that window comes back to the old
+   shape, which is reachable in practice and was the first bug this had.
+   Leading-edge, a pick lands within ~60ms; a 60-step pan still writes 5 times.
+4. **A link applies whole, not as a patch**: what it leaves out it means at
+   its default. `hashchange` matters as much as load here — pasting an address
+   into a tab that is already open changes the hash without reloading
+   anything, and without that listener the URL would sit there describing a
+   view the app is not in. (Our own `replaceState` does not fire it.)
+
+The one ordering constraint that is not obvious: the viewer's position has to
+be restored *after* the triple, because `set_triple()` sends the viewer back
+to the origin whenever the group changes under it — which on load it always
+does. The seed is in the late half for the mirror-image reason:
+`sync_shape_controls()` resets it to the preset's as the preset loads.
+
 ### Model Format
 
 Every model is generated at runtime by `src/ts/symmetry/`; `static/models/` is gone and nothing is fetched.

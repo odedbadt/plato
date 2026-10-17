@@ -8,6 +8,9 @@ import {
   SYMMETRY_FAMILIES, TriangleGeometry, get_group,
   hyperbolic, euclidean
 } from './symmetry'
+import {
+  UrlState, DEFAULT_URL_STATE, read_url_state, schedule_url_write
+} from './url_state'
 function parse_RGBA(color: string): [number, number, number, number] {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = 1;
@@ -281,6 +284,22 @@ export class App {
   init() {
     const _this = this;
     drop_stale_model_cache();
+    // Read before anything is built. The controls are initialised from these
+    // fields as they are hooked up, so the link has to be in hand first. What
+    // a link leaves out it means at its default, not "as you had it": a
+    // shared address has to arrive the same way whether it is opened in a
+    // fresh tab or pasted over a session that has been played with.
+    const url: UrlState = { ...DEFAULT_URL_STATE, ...read_url_state() };
+    this.apply_url_view(url);
+    // Pasting an address into a tab that is already here changes the hash
+    // without reloading anything, so without this the URL would be describing
+    // a view the app is not in. Our own writes are replaceState, which does
+    // not fire this.
+    window.addEventListener('hashchange', () => {
+      const changed: UrlState = { ...DEFAULT_URL_STATE, ...read_url_state() };
+      this.apply_url_view(changed);
+      this.apply_url_controls(changed);
+    });
     this.init_canvas_sizes();
 
     // Initialize WebGL renderer with cached shader programs
@@ -323,6 +342,9 @@ export class App {
       });
       this.load_preset(this.prefered_model_name, () => {
         _this.sync_symmetry_controls();
+        // The preset is the opening view; a link is a set of departures from
+        // it, so it goes on top rather than instead of it.
+        _this.apply_url_controls(url);
 
         const clear_btn = document.getElementById('clear-canvas-button');
         clear_btn?.addEventListener('click', () => _this.clear());
@@ -577,22 +599,14 @@ export class App {
     // Floating wireframe toggle, mirroring the checkbox in the controls panel
     const wireframe_btn = document.getElementById('wireframe-btn');
     const wireframe_checkbox = document.getElementById('wireframe') as HTMLInputElement;
-    const sync_wireframe_btn = () => {
-      const on = !!wireframe_checkbox?.checked;
-      wireframe_btn?.classList.toggle('active', on);
-      // Ink on paper: the ground goes light while the wireframe is up.
-      document.body.classList.toggle('paper', on);
-      // The style, weight and hide-back controls do nothing while it is off.
-      document.getElementById('wireframe-options')?.classList.toggle('off', !on);
-    };
     wireframe_btn?.addEventListener('click', () => {
       if (!wireframe_checkbox) return;
       wireframe_checkbox.checked = !wireframe_checkbox.checked;
-      sync_wireframe_btn();
+      this.sync_wireframe_button();
       this.is_dirty = true;
     });
-    wireframe_checkbox?.addEventListener('change', sync_wireframe_btn);
-    sync_wireframe_btn();
+    wireframe_checkbox?.addEventListener('change', () => this.sync_wireframe_button());
+    this.sync_wireframe_button();
 
     this.init_shape_controls();
 
@@ -1064,7 +1078,6 @@ export class App {
         option.textContent = hyperbolic.PROJECTION_LABELS[key];
         projection.appendChild(option);
       }
-      projection.value = this.projection;
       projection.addEventListener('change', () => {
         // The two models are the same tiling seen two ways, and the viewer
         // has not moved, so the view isometry carries straight over.
@@ -1089,9 +1102,20 @@ export class App {
       this.plane_view = [1, 0, 0, 0, 1, 0, 0, 0, 1];
       this.regenerate_shape();
     });
+    this.sync_plane_controls();
+  }
+
+  // The plane controls hold their state on the app rather than in the DOM, so
+  // they are written to rather than read from — on startup, and again
+  // whenever a URL moves the view out from under them.
+  sync_plane_controls() {
     set_input_value('hyper-cutoff', this.cutoff);
     set_input_value('euclid-scale', this.euclid_scale);
     set_input_checked('plane-checker', this.checker);
+    const projection = document.getElementById('hyper-projection') as HTMLSelectElement | null;
+    // Empty until init_plane_controls() fills it, which is after the first
+    // call to this; it sets the value itself on the way past.
+    if (projection?.options.length) projection.value = this.projection;
   }
 
   draw_seed_pad() {
@@ -1162,12 +1186,130 @@ export class App {
     this.sync_seed_mode();
   }
 
+  // The floating toggle, the ground and the dependent controls, all following
+  // the wireframe checkbox. A method rather than a closure in init_actions
+  // because the URL can set that checkbox long after the listeners are hooked
+  // up, and it has to look the same either way.
+  sync_wireframe_button() {
+    const on = input_checked('wireframe');
+    document.getElementById('wireframe-btn')?.classList.toggle('active', on);
+    // Ink on paper: the ground goes light while the wireframe is up.
+    document.body.classList.toggle('paper', on);
+    // The style, weight and hide-back controls do nothing while it is off.
+    document.getElementById('wireframe-options')?.classList.toggle('off', !on);
+  }
+
   // Seed mode and the classic controls are two descriptions of the same solid,
   // so the panel shows which one is live.
   sync_seed_mode() {
     const on = input_checked('shape-seed-on');
     document.getElementById('shape-options')?.classList.toggle('wythoff', on);
     if (on) this.draw_seed_pad();
+  }
+
+  // ---- The address bar ----------------------------------------------------
+  //
+  // The URL is a second copy of the view, so it only ever reads the state and
+  // writes it back; nothing downstream asks it anything. Fields that do not
+  // apply to what is being drawn are reported at their default so that
+  // encode_url_state() drops them: a solid's link carries no pan, a tiling's
+  // carries no rotation, and seed mode and the classic knobs each leave the
+  // other's settings out — the same split regenerate_shape() already makes
+  // when it decides which of the two to read.
+  url_snapshot(): UrlState {
+    const seed_on = input_checked('shape-seed-on');
+    const sum = this.seed[0] + this.seed[1] + this.seed[2] || 1;
+    const classic = <T,>(value: T, dflt: T) => seed_on ? dflt : value;
+    return {
+      triple: this.current_angles().slice(),
+      stellation: classic(
+        input_value('shape-stellation', 1), DEFAULT_URL_STATE.stellation),
+      size: input_value('shape-size', 1),
+      mirror_size: input_value('shape-mirror-size', 1),
+      dual: classic(input_checked('shape-dual'), DEFAULT_URL_STATE.dual),
+      rhombic: classic(input_checked('shape-rhombic'), DEFAULT_URL_STATE.rhombic),
+      seed_on,
+      seed: seed_on
+        ? this.seed.map(w => w / sum) : DEFAULT_URL_STATE.seed.slice(),
+      rotation: this.planar()
+        ? DEFAULT_URL_STATE.rotation.slice() : Array.from(this.rotation),
+      plane_view: this.planar()
+        ? this.plane_view.slice() : DEFAULT_URL_STATE.plane_view.slice(),
+      projection: this.projection,
+      cutoff: this.cutoff,
+      cell_size: this.euclid_scale,
+      checker: this.checker,
+      solid: input_checked('model'),
+      mirrors: input_checked('all-mirrors') ? 'a'
+        : input_checked('generating-mirrors') ? 'g'
+        : input_checked('no-mirrors') ? 'n' : '',
+      wireframe: input_checked('wireframe'),
+      wireframe_mode:
+        (document.getElementById('wireframe-mode') as HTMLSelectElement | null)
+          ?.value ?? DEFAULT_URL_STATE.wireframe_mode,
+      wireframe_weight: input_value('wf-weight', 1),
+      hide_back: input_checked('wf-hide-back')
+    };
+  }
+
+  // The half of a URL that lives on the app rather than in the DOM, applied
+  // before the controls are hooked up — init_plane_controls() writes these
+  // fields into their inputs as it goes, so setting them first is what puts
+  // the panel in step with the link.
+  apply_url_view(url: Partial<UrlState>) {
+    if (url.rotation) {
+      glMatrix.quat.set(this.rotation, url.rotation[0], url.rotation[1],
+        url.rotation[2], url.rotation[3]);
+      // A rounded quaternion is no longer quite a rotation.
+      glMatrix.quat.normalize(this.rotation, this.rotation);
+    }
+    if (url.projection) this.projection = url.projection as hyperbolic.Projection;
+    if (url.cutoff !== undefined) this.cutoff = url.cutoff;
+    if (url.cell_size !== undefined) this.euclid_scale = url.cell_size;
+    if (url.checker !== undefined) this.checker = url.checker;
+    this.sync_plane_controls();
+  }
+
+  // The rest of it: the controls, then the group, then where the viewer
+  // stands. That order is forced — set_triple() sends the viewer back to the
+  // origin whenever the group changes under it, which on load it always does,
+  // so a pan restored before the triple would be thrown away by it.
+  apply_url_controls(url: Partial<UrlState>) {
+    if (url.stellation !== undefined) set_input_value('shape-stellation', url.stellation);
+    if (url.size !== undefined) set_input_value('shape-size', url.size);
+    if (url.mirror_size !== undefined) set_input_value('shape-mirror-size', url.mirror_size);
+    if (url.dual !== undefined) set_input_checked('shape-dual', url.dual);
+    if (url.rhombic !== undefined) set_input_checked('shape-rhombic', url.rhombic);
+    if (url.seed_on !== undefined) set_input_checked('shape-seed-on', url.seed_on);
+    // The seed belongs to this half and not to apply_url_view, late as that
+    // looks: sync_shape_controls() puts it back to the preset's as the preset
+    // loads, which is after the view half has run.
+    if (url.seed) this.seed = url.seed.slice() as Vec3;
+    if (url.solid !== undefined) set_input_checked('model', url.solid);
+    if (url.mirrors !== undefined) {
+      // The group starts with none of the three chosen, which is a state no
+      // radio can be set to — so they are written one by one rather than by
+      // checking the one that won.
+      const chosen = { a: 'all-mirrors', g: 'generating-mirrors', n: 'no-mirrors' }
+      [url.mirrors as 'a' | 'g' | 'n'];
+      for (const id of ['all-mirrors', 'generating-mirrors', 'no-mirrors']) {
+        set_input_checked(id, id === chosen);
+      }
+    }
+    if (url.wireframe !== undefined) {
+      set_input_checked('wireframe', url.wireframe);
+      this.sync_wireframe_button();
+    }
+    if (url.wireframe_mode) {
+      const select = document.getElementById('wireframe-mode') as HTMLSelectElement | null;
+      if (select) select.value = url.wireframe_mode;
+    }
+    if (url.wireframe_weight !== undefined) set_input_value('wf-weight', url.wireframe_weight);
+    if (url.hide_back !== undefined) set_input_checked('wf-hide-back', url.hide_back);
+
+    if (url.triple) this.set_triple(url.triple as Angles);
+    if (url.plane_view && this.planar()) this.plane_view = url.plane_view.slice();
+    this.regenerate_shape();
   }
 
   // The canvas's shape, which decides how the plane is fitted into it.
@@ -1324,6 +1466,12 @@ export class App {
       return;
     }
     this.is_dirty = false;
+
+    // Nothing changes the picture without asking for a frame, so this one
+    // hook catches every change there is — a slider, a pan, a group, a
+    // checkbox — and the write behind it is throttled and deduplicated, so
+    // the frames that are redrawn for other reasons cost nothing.
+    schedule_url_write(() => this.url_snapshot());
 
     // Refresh texture from canvas
     this.renderer.refresh_texture();
