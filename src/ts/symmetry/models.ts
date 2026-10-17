@@ -75,23 +75,25 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
 
 export const GENERATED_MODEL_NAMES = Object.keys(MODEL_SPECS);
 
-// Models offered in the picker, in the order static/models/models.txt listed
-// them before everything moved into the generator. The old `dodecahedron` and
-// `icosahedron` entries are gone: they were the `_a` meshes with a colour
-// array the renderer never read, so they were duplicates of entries already
-// here.
-export const SELECTABLE_MODEL_NAMES = [
-    'cube',
-    'dodecahedron_a',
-    'icosahedron_a',
-    'octahedron',
-    'random_colored_st_dodec',
-    'random_colored_st_octa',
-    'sellated_dodecahedron',
-    'sellated_octahedron',
-    'stellated_dodecahedron',
-    'stellated_octahedron'
+// What the picker offers, now that the shape controls cover the variation the
+// old per-mesh names used to stand for: the reflection group itself, smallest
+// first. MODEL_SPECS stays as the preset registry behind generate_model(name)
+// — it is where the parameters recovered from the retired JSON live — but the
+// names there are history, not a menu.
+export const SYMMETRY_FAMILIES: SymmetryFamily[] = [
+    'tetrahedral', 'octahedral', 'icosahedral'
 ];
+
+// "Icosahedral (5,3,2)" — the group by name, with the Coxeter triple whose
+// mirror angles pi/x, pi/y, pi/z generate it.
+export function family_label(family: SymmetryFamily): string {
+    const [x, y, z] = FAMILY_ANGLES[family];
+    return `${family[0].toUpperCase()}${family.slice(1)} (${x},${y},${z})`;
+}
+
+export function family_order(family: SymmetryFamily): number {
+    return get_family(family).transformations.length;
+}
 
 type Family = { mirrors: Vec3[], transformations: Mat3[] };
 

@@ -2,8 +2,9 @@ import * as Glsl from './glsl'
 import * as webgl_utils from './webgl_utils'
 import { WebglRenderer, WireframeOptions, DEFAULT_WIREFRAME_OPTIONS } from './webgl_renderer'
 import {
-  ModelSpec, Vec3, corner_orders, generate_model, generate_model_from_spec,
-  get_model_spec, stellation_factor, SELECTABLE_MODEL_NAMES
+  ModelSpec, SymmetryFamily, Vec3, corner_orders, family_label,
+  generate_model, generate_model_from_spec, get_model_spec, stellation_factor,
+  SYMMETRY_FAMILIES
 } from './symmetry'
 function parse_RGBA(color: string): [number, number, number, number] {
   const canvas = document.createElement('canvas');
@@ -222,31 +223,26 @@ export class App {
     this.init_palette();
     this.init_texture_sketcher();
     this.init_actions();
-    const model_names = SELECTABLE_MODEL_NAMES.slice();
     {
-      this.model_names = model_names;
-      const first_model = model_names.includes(this.prefered_model_name) ?
-        this.prefered_model_name :
-        model_names[0]
-
+      this.model_names = SYMMETRY_FAMILIES.slice();
       _this.load_spinner_model();
 
       const container = document.getElementById('model-select-container');
       const model_select_element = document.createElement('select');
       model_select_element.id = 'model-select';
-      model_select_element.name = 'Models';
-      for (const model_name of model_names) {
+      model_select_element.name = 'Symmetry';
+      for (const family of SYMMETRY_FAMILIES) {
         const option = document.createElement('option');
-        option.value = model_name;
-        option.textContent = model_name;
+        option.value = family;
+        option.textContent = family_label(family);
         model_select_element.appendChild(option);
       }
       container?.appendChild(model_select_element);
-      model_select_element.value = first_model;
       model_select_element.addEventListener('change', () => {
-        this.load_and_set_model(model_select_element.value, () => { });
+        this.set_symmetry(model_select_element.value as SymmetryFamily);
       });
-      this.load_and_set_model(first_model, () => {
+      this.load_preset(this.prefered_model_name, () => {
+        model_select_element.value = _this.base_spec?.family ?? SYMMETRY_FAMILIES[0];
 
         const clear_btn = document.getElementById('clear-canvas-button');
         clear_btn?.addEventListener('click', () => _this.clear());
@@ -274,27 +270,28 @@ export class App {
     }
     requestAnimationFrame(animate)
   }
-  load_and_set_model(model_name: string, ready_callback: () => void) {
+  // Loads one of the named presets in MODEL_SPECS, shape controls and all.
+  // Only the opening view uses this now; the picker chooses a symmetry group
+  // and leaves the shape alone.
+  load_preset(model_name: string, ready_callback: () => void) {
     if (this.interval_id) {
       window.clearInterval(this.interval_id);
     }
-    const shape_name_element = document.getElementById('shape-name');
-    if (shape_name_element) {
-      shape_name_element.innerHTML = 'Loading...';
-    }
-    // Dropped before the spinner goes up, so a frame drawn in between does not
-    // wireframe the spinner against the outgoing model's spec.
-    this.base_spec = null;
-    this.live_spec = null;
-    if (this.spinner_model) {
-      this.set_model(this.spinner_model, 'spinner');
-    }
-    //this.set_spinning_speed(.035);
     this.set_model(generate_model(model_name), model_name);
     this.base_spec = get_model_spec(model_name);
     this.live_spec = this.base_spec ? { ...this.base_spec } : null;
     this.sync_shape_controls();
     ready_callback();
+  }
+
+  // Swaps the reflection group under whatever the shape controls currently
+  // say, so a stellation or a seed position carries from one symmetry to the
+  // next instead of being reset by the change.
+  set_symmetry(family: SymmetryFamily) {
+    if (!this.base_spec) return;
+    this.base_spec = { ...this.base_spec, family };
+    this.model_name = family;
+    this.regenerate_shape();
   }
   set_spinning_speed(spinning_speed: number) {
     this.spinning_speed = spinning_speed || 0
@@ -456,10 +453,12 @@ export class App {
     if (!overlay || !grid) return;
     overlay.classList.remove('hidden');
 
-    // Thumbnails are rendered once and cached as <img> elements in the grid.
-    if (grid.children.length > 0) return;
-
-    const model_names = this.model_names || [];
+    // Rebuilt on every open: the cards show each symmetry carrying whatever
+    // the shape controls currently say, so the grid is a preview of the swap
+    // rather than a fixed catalogue.
+    grid.innerHTML = '';
+    const spec = this.live_spec ?? this.base_spec;
+    if (!spec) return;
 
     // Single shared offscreen renderer reused for every thumbnail.
     const size = 128;
@@ -474,23 +473,29 @@ export class App {
     glMatrix.quat.rotateY(rot, rot, Math.PI / 5);
     const uniforms = webgl_utils.matrix_uniforms(rot);
 
-    for (const name of model_names) {
-      const model = generate_model(name);
+    for (const family of SYMMETRY_FAMILIES) {
+      const model = generate_model_from_spec({ ...spec, family });
 
       thumb_renderer.begin_frame();
       thumb_renderer.draw_model(model, uniforms);
       thumb_renderer.end_frame();
       const url = thumb_canvas.toDataURL();
 
+      const label = family_label(family);
       const card = document.createElement('div');
       card.className = 'model-thumb-card';
       const img = document.createElement('img');
       img.src = url;
-      img.alt = name;
+      img.alt = label;
       card.appendChild(img);
+      const caption = document.createElement('div');
+      caption.className = 'model-thumb-label';
+      caption.textContent = label;
+      card.appendChild(caption);
       card.addEventListener('click', () => {
-        this.load_and_set_model(name, () => {});
-        this.clear();
+        this.set_symmetry(family);
+        const select = document.getElementById('model-select') as HTMLSelectElement | null;
+        if (select) select.value = family;
         overlay.classList.add('hidden');
       });
       grid.appendChild(card);

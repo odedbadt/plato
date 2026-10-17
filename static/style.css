@@ -198,9 +198,18 @@ body.paper .floating-btn.active {
 .model-thumb-card:active { background: rgba(255,255,255,0.2); }
 .model-thumb-card img {
   width: 100%;
-  height: 100%;
+  height: calc(100% - 22px);
   object-fit: cover;
   display: block;
+}
+.model-thumb-label {
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
+  color: #ccc;
+  font-family: monospace;
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 #spin-toggle {
