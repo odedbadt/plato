@@ -145,24 +145,49 @@ export function matrix_uniforms(rotation: glMatrix.quat): Uniforms {
     }
 }
 
+// Attribute name, item size, and where the model keeps the data.
+const MODEL_ATTRIBUTES: Array<[string, number, (model: Model) => Array<number> | undefined]> = [
+    ['aVertexPosition', 3, model => model.vertices],
+    ['aNormalDirection', 3, model => model.normals],
+    ['aTextureCoord', 2, model => model.texture],
+    ['aVertexColor', 4, model => model.colors],
+];
+
 export function model_to_geometry(model: Model): THREE.BufferGeometry {
     const geometry = new THREE.BufferGeometry();
     geometry.setDrawRange(0, Math.floor(model.vertices.length / 3));
-    geometry.setAttribute('aVertexPosition',
-        new THREE.BufferAttribute(new Float32Array(model.vertices), 3));
-    if (model.normals) {
-        geometry.setAttribute('aNormalDirection',
-            new THREE.BufferAttribute(new Float32Array(model.normals), 3));
-    }
-    if (model.texture) {
-        geometry.setAttribute('aTextureCoord',
-            new THREE.BufferAttribute(new Float32Array(model.texture), 2));
-    }
-    if (model.colors) {
-        geometry.setAttribute('aVertexColor',
-            new THREE.BufferAttribute(new Float32Array(model.colors), 4));
+    for (const [name, item_size, pick] of MODEL_ATTRIBUTES) {
+        const source = pick(model);
+        if (!source) continue;
+        geometry.setAttribute(name,
+            new THREE.BufferAttribute(new Float32Array(source), item_size));
     }
     return geometry;
+}
+
+// Overwrite a geometry's attributes from a model of the same shape, instead of
+// allocating a new one. A shape control being dragged regenerates the model
+// every frame, and for a fixed symmetry family the buffer lengths never change
+// — only the numbers in them. Returns false when the layouts differ and the
+// caller has to rebuild.
+export function update_geometry_in_place(
+    geometry: THREE.BufferGeometry, model: Model
+): boolean {
+    for (const [name, , pick] of MODEL_ATTRIBUTES) {
+        const source = pick(model);
+        const attribute = geometry.getAttribute(name) as THREE.BufferAttribute | undefined;
+        if (!source !== !attribute) return false;
+        if (source && attribute && attribute.array.length !== source.length) return false;
+    }
+    for (const [name, , pick] of MODEL_ATTRIBUTES) {
+        const source = pick(model);
+        if (!source) continue;
+        const attribute = geometry.getAttribute(name) as THREE.BufferAttribute;
+        (attribute.array as Float32Array).set(source);
+        attribute.needsUpdate = true;
+    }
+    geometry.setDrawRange(0, Math.floor(model.vertices.length / 3));
+    return true;
 }
 
 export function create_canvas_texture(texture_canvas: HTMLCanvasElement): THREE.CanvasTexture {

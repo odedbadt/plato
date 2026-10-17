@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import { Model } from './webgl_utils'
-import { generate_edges, is_generated_model } from './symmetry'
+import {
+  ModelSpec, generate_edges, generate_edges_from_spec, is_generated_model
+} from './symmetry'
 
 // Wireframe edge extraction.
 //
@@ -47,10 +49,19 @@ function face_normal(v: Array<number>, b: number): Vec3 {
   return [nx / l, ny / l, nz / l];
 }
 
+// Where a model's edges can be asked for exactly: a registered model's name,
+// or a spec the shape controls have edited. Absent (or a legacy JSON model)
+// falls back to measuring the mesh.
+export type EdgeSource = string | ModelSpec;
+
 // Dispatch: exact when the generator knows the model, measured otherwise.
-export function extract_edges(model: Model, model_name?: string): EdgeSet {
-    if (model_name && is_generated_model(model_name)) {
-        return edges_from_symmetry(model_name);
+export function extract_edges(model: Model, source?: EdgeSource): EdgeSet {
+    if (typeof source === 'string') {
+        if (is_generated_model(source)) {
+            return edges_from_symmetry(generate_edges(source));
+        }
+    } else if (source) {
+        return edges_from_symmetry(generate_edges_from_spec(source));
     }
     return edges_from_dihedral(model);
 }
@@ -58,8 +69,8 @@ export function extract_edges(model: Model, model_name?: string): EdgeSet {
 // Edges swept from the fundamental triangle's crease slots. Each one arrives
 // twice (once from the triangle on either side), so they still need welding and
 // deduping — but nothing here is a judgement call about which edges are real.
-function edges_from_symmetry(model_name: string): EdgeSet {
-    const { starts, ends } = generate_edges(model_name);
+function edges_from_symmetry(swept: { starts: number[], ends: number[] }): EdgeSet {
+    const { starts, ends } = swept;
     const points: Vec3[] = [];
     const ids = new Map<string, number>();
     let radius = 0;

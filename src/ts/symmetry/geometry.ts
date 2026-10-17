@@ -194,6 +194,18 @@ export function build_mirror_mesh(
     return { mesh, normals };
 }
 
+// How far v2 is pushed out before the triangle is rescaled. `stellated: true`
+// is the classic factor of 2; `stellation` replaces it with any value, so a
+// slider can travel continuously between the solid (1) and its stellation (2).
+//
+// Only at those special values does a face stay flat across the edges the
+// group reflects it over, so intermediate settings are genuinely creased
+// everywhere — crease_slots() reports that honestly and the wireframe gets
+// denser in between.
+export function stellation_factor(options: MeshOptions): number {
+    return options.stellation ?? (options.stellated ? 2 : 1);
+}
+
 // The fundamental triangle, plus which mirror plane each of its edges lies in.
 //
 // v0 = m1 x m2 is perpendicular to the normals of mirrors 1 and 2, so it lies
@@ -210,7 +222,8 @@ export type FundamentalTriangle = {
 export function fundamental_triangle(
     mirrors: Vec3[], options: MeshOptions = {}
 ): FundamentalTriangle {
-    const { dual = false, stellated = false, rhombic = false, factor = 1.0 } = options;
+    const { dual = false, rhombic = false, factor = 1.0 } = options;
+    const stellation = stellation_factor(options);
     const indices = dual ? [0, 2, 1] : [0, 1, 2];
 
     const m1xm2 = normalize(cross(mirrors[indices[1]], mirrors[indices[2]]));
@@ -226,7 +239,7 @@ export function fundamental_triangle(
     let v2 = rhombic
         ? scale(m0xm1, 1 / dot(m0xm1, m1xm2))
         : scale(m0xm1, dot(m0xm1, m1xm2));
-    if (stellated) v2 = scale(v2, 2);
+    if (stellation !== 1) v2 = scale(v2, stellation);
 
     const max_norm = Math.max(norm(v0), norm(v1), norm(v2));
     v0 = scale(v0, factor / max_norm);
@@ -303,6 +316,10 @@ export function transformations_to_edges(
 export type MeshOptions = {
     dual?: boolean,
     stellated?: boolean,
+    // Continuous stand-in for `stellated`, which it overrides when present:
+    // 1 is the plain solid, 2 what `stellated: true` gives. See
+    // stellation_factor().
+    stellation?: number,
     rhombic?: boolean,
     factor?: number,
     mirror_factor?: number,
@@ -312,6 +329,10 @@ export type MeshOptions = {
     decimals?: number,
     // Extra triangles' worth of UVs emitted past the draw range; see below.
     texture_padding?: number,
+    // Rounding exists only to match the retired JSON models byte for byte, and
+    // costs more than the sweep that produces the numbers. Pass false while a
+    // shape control is being dragged.
+    round?: boolean,
     legacy_duplicate_planes?: boolean
 };
 
@@ -329,8 +350,10 @@ export function transformations_to_mesh(
         include_mirrors = true,
         decimals = DEFAULT_DECIMALS,
         texture_padding = 18,
+        round = true,
         legacy_duplicate_planes = false
     } = options;
+    const q = round ? (v: number) => round_to(v, decimals) : (v: number) => v;
 
     const t = transformations.length;
     const { v0, v1, v2, face_normal } = fundamental_triangle(mirrors, options);
@@ -340,18 +363,10 @@ export function transformations_to_mesh(
     for (const transformation of transformations) {
         for (const v of [v0, v1, v2]) {
             const p = mat_apply(transformation, v);
-            vertices.push(
-                round_to(p[0], decimals),
-                round_to(p[1], decimals),
-                round_to(p[2], decimals)
-            );
+            vertices.push(q(p[0]), q(p[1]), q(p[2]));
         }
         const n = mat_apply(transformation, face_normal);
-        const rn: Vec3 = [
-            round_to(n[0], decimals),
-            round_to(n[1], decimals),
-            round_to(n[2], decimals)
-        ];
+        const rn: Vec3 = [q(n[0]), q(n[1]), q(n[2])];
         normals.push(...rn, ...rn, ...rn);
     }
 
@@ -367,8 +382,8 @@ export function transformations_to_mesh(
         const { mesh, normals: mesh_normals } = build_mirror_mesh(
             mirrors, transformations, number_of_rays, mirror_factor,
             legacy_duplicate_planes);
-        model.mirrors = mesh.map(v => round_to(v, decimals));
-        model.mirror_normals = mesh_normals.map(v => round_to(v, decimals));
+        model.mirrors = round ? mesh.map(q) : mesh;
+        model.mirror_normals = round ? mesh_normals.map(q) : mesh_normals;
     }
 
     return model;

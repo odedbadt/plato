@@ -136,19 +136,22 @@ body.paper .floating-btn.active {
   font-size: 13px;
 }
 
-#wireframe-options .slider-row {
+#wireframe-options .slider-row,
+#shape-options .slider-row {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-#wireframe-options .slider-row label {
+#wireframe-options .slider-row label,
+#shape-options .slider-row label {
   flex: 0 0 6.5em;
   margin-left: 0;
   white-space: nowrap;
 }
 
-#wireframe-options .slider-row input[type=range] {
+#wireframe-options .slider-row input[type=range],
+#shape-options .slider-row input[type=range] {
   flex: 1 1 auto;
   min-width: 0;
   height: 18px;
@@ -326,20 +329,40 @@ legend {
 }
 
 #rendering-options label,
-#wireframe-options label {
+#wireframe-options label,
+#shape-options label {
   color: #ccc;
   font-size: 13px;
   margin-left: 6px;
 }
 
 #rendering-options > div,
-#wireframe-options > div {
+#wireframe-options > div,
+#shape-options > div {
   margin: 8px 0;
 }
 
 #rendering-options input,
-#wireframe-options input {
+#wireframe-options input,
+#shape-options input {
   accent-color: #448AFF;
+}
+
+/* Reset shape */
+#shape-reset {
+  width: 100%;
+  padding: 6px;
+  border-radius: 6px;
+  border: none;
+  background: #444;
+  color: white;
+  font-family: monospace;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#shape-reset:hover {
+  background: #555;
 }
 
 /* Colors */
@@ -404,15 +427,22 @@ legend {
   }
 
   #rendering-options label,
-  #wireframe-options label {
+  #wireframe-options label,
+  #shape-options label {
     font-size: 16px;
   }
 
   #rendering-options input[type=checkbox],
   #rendering-options input[type=radio],
-  #wireframe-options input[type=checkbox] {
+  #wireframe-options input[type=checkbox],
+  #shape-options input[type=checkbox] {
     width: 20px;
     height: 20px;
+  }
+
+  #shape-reset {
+    padding: 10px;
+    font-size: 16px;
   }
 
   #wireframe-options select {

@@ -1,10 +1,10 @@
 import * as THREE from 'three'
 import * as Glsl from './glsl'
 import {
-  Model, Uniforms, model_to_geometry, create_canvas_texture,
-  CAMERA_DISTANCE, CLIP_NEAR, CLIP_FAR,
+  Model, Uniforms, model_to_geometry, update_geometry_in_place,
+  create_canvas_texture, CAMERA_DISTANCE, CLIP_NEAR, CLIP_FAR,
 } from './webgl_utils'
-import { EdgeSet, extract_edges, edges_to_geometry } from './wireframe'
+import { EdgeSet, EdgeSource, extract_edges, edges_to_geometry } from './wireframe'
 
 export type WireframeOptions = {
   // false: depth-weighted ink. true: every edge a flat 1px, as a baseline.
@@ -214,35 +214,44 @@ export class WebglRenderer {
     }
   }
 
-  draw_model(model: Model, uniforms: Uniforms) {
-    this.apply_uniforms(this.main_material, uniforms);
+  // Refreshes `geo` in place where the layout allows it, so a model that is
+  // being regenerated every frame does not churn a new BufferGeometry each
+  // time; rebuilds otherwise.
+  private refresh_geometry(
+    geo: THREE.BufferGeometry | null, model: Model
+  ): THREE.BufferGeometry {
+    if (geo && update_geometry_in_place(geo, model)) return geo;
+    geo?.dispose();
+    return model_to_geometry(model);
+  }
+
+  private model_geometry(model: Model): THREE.BufferGeometry {
     if (this.cached_model !== model) {
-      this.cached_model_geo?.dispose();
-      this.cached_model_geo = model_to_geometry(model);
+      this.cached_model_geo = this.refresh_geometry(this.cached_model_geo, model);
       this.cached_model = model;
     }
-    this.render_pass(this.cached_model_geo!, this.main_material, false);
+    return this.cached_model_geo!;
+  }
+
+  draw_model(model: Model, uniforms: Uniforms) {
+    this.apply_uniforms(this.main_material, uniforms);
+    this.render_pass(this.model_geometry(model), this.main_material, false);
   }
 
   // Lay the solid into the depth buffer without drawing it, so a wireframe
   // rendered afterwards is occluded by the surface it belongs to.
   draw_model_depth_only(model: Model, uniforms: Uniforms) {
     this.apply_uniforms(this.main_material, uniforms);
-    if (this.cached_model !== model) {
-      this.cached_model_geo?.dispose();
-      this.cached_model_geo = model_to_geometry(model);
-      this.cached_model = model;
-    }
+    const geometry = this.model_geometry(model);
     this.main_material.colorWrite = false;
-    this.render_pass(this.cached_model_geo!, this.main_material, false);
+    this.render_pass(geometry, this.main_material, false);
     this.main_material.colorWrite = true;
   }
 
   draw_mirrors(model: Model, uniforms: Uniforms) {
     this.apply_uniforms(this.mirror_material, uniforms);
     if (this.cached_mirrors_verts !== model.vertices) {
-      this.cached_mirrors_geo?.dispose();
-      this.cached_mirrors_geo = model_to_geometry(model);
+      this.cached_mirrors_geo = this.refresh_geometry(this.cached_mirrors_geo, model);
       this.cached_mirrors_verts = model.vertices;
     }
     this.render_pass(this.cached_mirrors_geo!, this.mirror_material, false);
@@ -253,11 +262,11 @@ export class WebglRenderer {
   // halo prepass that cuts the farther line at every crossing.
   draw_wireframe(
     model: Model, uniforms: Uniforms, options: WireframeOptions,
-    model_name?: string
+    source?: EdgeSource
   ) {
     if (this.cached_wire_model !== model) {
       this.cached_wire_geo?.dispose();
-      this.cached_wire_edges = extract_edges(model, model_name);
+      this.cached_wire_edges = extract_edges(model, source);
       this.cached_wire_geo = edges_to_geometry(this.cached_wire_edges);
       this.cached_wire_model = model;
     }

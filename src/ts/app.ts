@@ -1,7 +1,11 @@
 import * as Glsl from './glsl'
 import * as webgl_utils from './webgl_utils'
 import { WebglRenderer, WireframeOptions, DEFAULT_WIREFRAME_OPTIONS } from './webgl_renderer'
-import { generate_model, is_generated_model, GENERATED_MODEL_NAMES, SELECTABLE_MODEL_NAMES } from './symmetry'
+import {
+  ModelSpec, generate_model, generate_model_from_spec, get_model_spec,
+  is_generated_model, stellation_factor,
+  GENERATED_MODEL_NAMES, SELECTABLE_MODEL_NAMES
+} from './symmetry'
 function parse_RGBA(color: string): [number, number, number, number] {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = 1;
@@ -76,6 +80,33 @@ function project_to_sphere(x: number, y: number): glMatrix.vec3 {
   return glMatrix.vec3.fromValues(x / r, y / r, 0);
 }
 
+// Shape controls, by the kind of event they report changes with.
+const SHAPE_SLIDERS = ['shape-stellation', 'shape-size', 'shape-mirror-size'];
+const SHAPE_TOGGLES = ['shape-dual', 'shape-rhombic'];
+
+function input_of(id: string): HTMLInputElement | null {
+  return document.getElementById(id) as HTMLInputElement | null;
+}
+
+function input_value(id: string, fallback: number): number {
+  const parsed = parseFloat(input_of(id)?.value ?? '');
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function input_checked(id: string): boolean {
+  return !!input_of(id)?.checked;
+}
+
+function set_input_value(id: string, value: number) {
+  const input = input_of(id);
+  if (input) input.value = String(value);
+}
+
+function set_input_checked(id: string, value: boolean) {
+  const input = input_of(id);
+  if (input) input.checked = value;
+}
+
 export class App {
   prefered_model_name: string;
   model: any;
@@ -101,6 +132,11 @@ export class App {
   // Which model `this.model` is, so the wireframe can ask the generator for
   // its edges instead of measuring them off the mesh.
   model_name: string | null = null;
+  // The parameters `this.model` was generated from, as loaded (base_spec) and
+  // as the shape controls currently have them (live_spec). Null for the legacy
+  // JSON models, which have no generator to vary.
+  base_spec: ModelSpec | null = null;
+  live_spec: ModelSpec | null = null;
   // Multi-touch state
   active_pointers: Map<number, { x: number, y: number }> = new Map();
   rotating: boolean = false;
@@ -262,6 +298,10 @@ export class App {
     if (shape_name_element) {
       shape_name_element.innerHTML = 'Loading...';
     }
+    // Dropped before the spinner goes up, so a frame drawn in between does not
+    // wireframe the spinner against the outgoing model's spec.
+    this.base_spec = null;
+    this.live_spec = null;
     if (this.spinner_model) {
       this.set_model(this.spinner_model, 'spinner');
     }
@@ -273,6 +313,9 @@ export class App {
           _this.cache.setItem(model_name, JSON.stringify(model));
         }
         _this.set_model(model, model_name)
+        _this.base_spec = get_model_spec(model_name);
+        _this.live_spec = _this.base_spec ? { ..._this.base_spec } : null;
+        _this.sync_shape_controls();
         ready_callback()
       })
   }
@@ -415,6 +458,8 @@ export class App {
     });
     wireframe_checkbox?.addEventListener('change', sync_wireframe_btn);
     sync_wireframe_btn();
+
+    this.init_shape_controls();
 
     // Close modal when clicking the backdrop
     const overlay = document.getElementById('model-picker-overlay');
@@ -766,6 +811,56 @@ export class App {
   // Translate the wireframe controls into renderer options. The panel exposes
   // a style, a single weight, and whether to hide what is round the back; the
   // rest of the doc's parameters keep their recommended values.
+  // Shape controls. Everything here varies the fundamental triangle only, so
+  // the reflection group is never re-enumerated and a drag regenerates the
+  // whole solid in well under a frame.
+  init_shape_controls() {
+    const regenerate = () => this.regenerate_shape();
+    for (const id of SHAPE_SLIDERS) {
+      document.getElementById(id)?.addEventListener('input', regenerate);
+    }
+    for (const id of SHAPE_TOGGLES) {
+      document.getElementById(id)?.addEventListener('change', regenerate);
+    }
+    document.getElementById('shape-reset')?.addEventListener('click', () => {
+      this.sync_shape_controls();
+      this.regenerate_shape();
+    });
+  }
+
+  // Put the controls back to what the loaded model asks for, and hide them
+  // entirely for the legacy models there is no generator behind.
+  sync_shape_controls() {
+    const spec = this.base_spec;
+    const section = document.getElementById('shape-options');
+    if (section) section.style.display = spec ? '' : 'none';
+    if (!spec) return;
+    set_input_value('shape-stellation', stellation_factor(spec));
+    set_input_value('shape-size', spec.factor ?? 1);
+    set_input_value('shape-mirror-size', spec.mirror_factor ?? 1);
+    set_input_checked('shape-dual', !!spec.dual);
+    set_input_checked('shape-rhombic', !!spec.rhombic);
+  }
+
+  regenerate_shape() {
+    if (!this.base_spec) return;
+    const spec: ModelSpec = {
+      ...this.base_spec,
+      stellation: input_value('shape-stellation', stellation_factor(this.base_spec)),
+      factor: input_value('shape-size', this.base_spec.factor ?? 1),
+      mirror_factor: input_value('shape-mirror-size', this.base_spec.mirror_factor ?? 1),
+      dual: input_checked('shape-dual'),
+      rhombic: input_checked('shape-rhombic'),
+      // Nothing downstream of here needs the JSON models' rounding, and it
+      // costs more than the sweep itself.
+      round: false
+    };
+    this.live_spec = spec;
+    // Keeps the drawing: every fundamental triangle carries the same UVs
+    // whatever the geometry does, so the texture never has to be reset.
+    this.set_model(generate_model_from_spec(spec), this.model_name);
+  }
+
   wireframe_options(): WireframeOptions {
     const style = (document.getElementById('wireframe-mode') as HTMLSelectElement)?.value
       || 'depth-halo';
@@ -825,7 +920,8 @@ export class App {
         this.renderer.draw_model_depth_only(this.model, uniforms);
       }
       this.renderer.draw_wireframe(
-        this.model, uniforms, wireframe_options, this.model_name ?? undefined);
+        this.model, uniforms, wireframe_options,
+        this.live_spec ?? this.model_name ?? undefined);
     }
 
     // Draw mirrors

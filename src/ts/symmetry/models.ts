@@ -99,18 +99,38 @@ export function is_generated_model(model_name: string): boolean {
     return Object.prototype.hasOwnProperty.call(MODEL_SPECS, model_name);
 }
 
-export function generate_model(model_name: string): GeneratedModel {
+// A copy of a model's parameters, for a caller that wants to vary them. Null
+// for the legacy JSON models, which have no generator behind them.
+export function get_model_spec(model_name: string): ModelSpec | null {
+    const spec = MODEL_SPECS[model_name];
+    return spec ? { ...spec } : null;
+}
+
+function spec_of(model_name: string): ModelSpec {
     const spec = MODEL_SPECS[model_name];
     if (!spec) throw new Error(`Unknown generated model: ${model_name}`);
+    return spec;
+}
+
+// Nothing here depends on a spec being one of MODEL_SPECS: the group is keyed
+// by family alone, so a spec edited at runtime generates just as well as a
+// registered one. That is what the shape controls ride on.
+export function generate_model_from_spec(spec: ModelSpec): GeneratedModel {
     const { mirrors, transformations } = get_family(spec.family);
     return transformations_to_mesh(mirrors, transformations, spec);
+}
+
+export function generate_edges_from_spec(spec: ModelSpec) {
+    const { mirrors, transformations } = get_family(spec.family);
+    return transformations_to_edges(mirrors, transformations, spec);
+}
+
+export function generate_model(model_name: string): GeneratedModel {
+    return generate_model_from_spec(spec_of(model_name));
 }
 
 // The solid's real edges, straight from the group rather than recovered from
 // the mesh afterwards.
 export function generate_edges(model_name: string) {
-    const spec = MODEL_SPECS[model_name];
-    if (!spec) throw new Error(`Unknown generated model: ${model_name}`);
-    const { mirrors, transformations } = get_family(spec.family);
-    return transformations_to_edges(mirrors, transformations, spec);
+    return generate_edges_from_spec(spec_of(model_name));
 }

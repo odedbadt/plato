@@ -132,6 +132,32 @@
           <label for="no-mirrors">No mirrors</label>
         </div>
       </fieldset>
+      <fieldset id="shape-options">
+        <legend>Shape:</legend>
+        <div class="slider-row">
+          <label for="shape-stellation">Stellation</label>
+          <input type="range" id="shape-stellation" min="0.2" max="3" step="0.01" value="1">
+        </div>
+        <div class="slider-row">
+          <label for="shape-size">Size</label>
+          <input type="range" id="shape-size" min="0.3" max="1.6" step="0.01" value="1">
+        </div>
+        <div class="slider-row">
+          <label for="shape-mirror-size">Mirror size</label>
+          <input type="range" id="shape-mirror-size" min="0.3" max="1.6" step="0.01" value="1">
+        </div>
+        <div>
+          <input type="checkbox" id="shape-dual" name="shape-dual" value="shape-dual">
+          <label for="shape-dual">Dual</label>
+        </div>
+        <div>
+          <input type="checkbox" id="shape-rhombic" name="shape-rhombic" value="shape-rhombic">
+          <label for="shape-rhombic">Rhombic</label>
+        </div>
+        <div>
+          <button type="button" id="shape-reset">Reset shape</button>
+        </div>
+      </fieldset>
       <fieldset id="wireframe-options">
         <legend>Wireframe:</legend>
         <div>
