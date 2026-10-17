@@ -23,9 +23,9 @@ npm run bundle  # Webpack bundle — required for the app to pick up changes
 
 ### Core Modules
 
-**`src/ts/app.ts`** — Main application controller. Handles model loading, UI events, drawing with mirror symmetry, color/pen selection, and canvas lifecycle. Uses Vue 3 (minimal — just the model selector dropdown). `load_model_by_name()` is the loading seam: generated models are built on the spot, and only the legacy coloured models are fetched and cached in localStorage.
+**`src/ts/app.ts`** — Main application controller. Handles model loading, UI events, drawing with mirror symmetry, color/pen selection, and canvas lifecycle. Uses Vue 3 (minimal — just the model selector dropdown). Every model is generated on the spot by `src/ts/symmetry/`; there is no fetch, no cache and no loading state. `drop_stale_model_cache()` clears what the old fetching version left in localStorage and can go once no browser still holds it.
 
-**`src/ts/symmetry/`** — Generates the polyhedra at runtime, replacing most of the JSON files that used to ship. A TypeScript port of the Python/jupytext notebooks in `~/work/weekend/concepts/symmetry/`.
+**`src/ts/symmetry/`** — Generates every polyhedron at runtime, replacing the JSON files that used to ship. A TypeScript port of the Python/jupytext notebooks in `~/work/weekend/concepts/symmetry/`.
 - `linalg.ts` — vec3 / row-major mat3 helpers.
 - `geometry.ts` — the Coxeter kaleidoscope construction: `place_mirrors()` positions three mirror planes at angles pi/x, pi/y, pi/z; `mirror_matrices_to_group_transformations()` closes the Householder reflections into the full group; `transformations_to_mesh()` sweeps one fundamental triangle through it; `build_mirror_mesh()` makes the cyan mirror-plane discs.
 - `models.ts` — per-model parameters (`MODEL_SPECS`), the picker's name list, and `generate_model()`. Reflection groups are enumerated once and cached per family. `generate_model_from_spec()` / `generate_edges_from_spec()` take the parameters directly, so a spec edited at runtime generates as well as a registered one.
@@ -36,7 +36,7 @@ The controls panel's **Shape** section rides on that: stellation, size, mirror s
 
 The **Seed point** checkbox swaps the stellation/dual/rhombic knobs for the seed pad, which draws the fundamental triangle flat with its corners labelled by rotation order. Seed mode maps UVs through barycentric coordinates on that triangle rather than giving every facet the same UV triangle, so a drawing lands on the part of the texture each piece's place in the domain calls for. At a corner this reproduces the classic generator exactly, geometry and texture both. Buffer layouts do not depend on where the seed sits — degenerate seeds just collapse triangles to zero area — so the in-place upload holds and the pad drags at ~0.18 ms a step.
 
-Output matches the JSON it replaced exactly — vertices, normals and UVs are byte-identical. The one deliberate difference is the mirror mesh: the original's sign-canonicalisation compared floats against exactly `0`, so near-zero components let a plane and its negation both through, drawing 2 of the icosahedral discs twice (17 blocks for 15 planes, 11 for 9, 7 for 6). The port compares against an epsilon and emits each plane once; pass `legacy_duplicate_planes` to restore the old behaviour.
+Output matches the JSON it replaced exactly — vertices, normals and UVs are byte-identical for the models that were already generated, and within the generator's own 3-decimal rounding for the four whose parameters were recovered by fitting the shipped meshes (`sellated_*`, `random_colored_st_*`; see `MODEL_SPECS`). The one deliberate difference is the mirror mesh: the original's sign-canonicalisation compared floats against exactly `0`, so near-zero components let a plane and its negation both through, drawing 2 of the icosahedral discs twice (17 blocks for 15 planes, 11 for 9, 7 for 6). The port compares against an epsilon and emits each plane once; pass `legacy_duplicate_planes` to restore the old behaviour.
 
 **`src/ts/webgl_renderer.ts`** — Wraps Three.js. Three rendering passes:
 1. `main_material` — 3D model with texture mapping
@@ -45,21 +45,23 @@ Output matches the JSON it replaced exactly — vertices, normals and UVs are by
 
 **`src/ts/glsl.ts`** — Raw GLSL shader strings. Directional lighting via dot-product normal shading; texture sampling with alpha blending.
 
-**`src/ts/webgl_utils.ts`** — Matrix math helpers (`gl-matrix`) and geometry conversion: `model_to_geometry()` converts model JSON → Three.js `BufferGeometry`, `matrix_uniforms()` computes projection/view/rotation matrices.
+**`src/ts/webgl_utils.ts`** — Matrix math helpers (`gl-matrix`) and geometry conversion: `model_to_geometry()` converts a generated model → Three.js `BufferGeometry`, `matrix_uniforms()` computes projection/view/rotation matrices.
 
 ### Model Format
 
-Most models are generated at runtime by `src/ts/symmetry/`. Six legacy randomly-coloured variants (`dodecahedron`, `icosahedron`, `sellated_*`, `random_colored_st_*`) are not reproducible from the generator and still load from `static/models/*.json`. Both paths produce the same shape:
+Every model is generated at runtime by `src/ts/symmetry/`; `static/models/` is gone and nothing is fetched.
 ```typescript
 {
   vertices: number[],       // XYZ triplets
   normals?: number[],       // surface normals
   texture?: number[],       // UV coordinates
-  colors?: number[],        // RGBA vertex colors
+  colors?: number[],        // RGBA vertex colors — never rendered, see below
   mirrors?: number[],       // mirror plane geometry
   mirror_normals?: number[] // mirror plane normals
 }
 ```
+
+`colors` is vestigial: the shipped JSON carried it, `model_to_geometry()` still uploads it as `aVertexColor`, and no shader has ever declared that attribute. That is why the six "coloured" models were interchangeable with their generated equivalents — the colours were inert. Nothing produces `colors` now.
 
 ### Dependencies
 - `three` — WebGL rendering abstraction

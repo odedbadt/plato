@@ -266,7 +266,7 @@ export class WebglRenderer {
   ) {
     if (this.cached_wire_model !== model) {
       this.cached_wire_geo?.dispose();
-      this.cached_wire_edges = extract_edges(model, source);
+      this.cached_wire_edges = extract_edges(source);
       this.cached_wire_geo = edges_to_geometry(this.cached_wire_edges);
       this.cached_wire_model = model;
     }

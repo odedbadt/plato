@@ -44,6 +44,23 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     icosahedron_a: { family: 'icosahedral', dual: true },
     stellated_dodecahedron: { family: 'icosahedral', stellated: true },
     tetra_b: { family: 'tetrahedral' },
+    // The four below shipped as JSON until their parameters were recovered by
+    // fitting the meshes; each reproduces the file it replaced to 1e-16. The
+    // random_colored_* pair needs `corner_scales` because the driver pulled
+    // corner 1 in by a factor none of the formulas above produce, and their
+    // names are left as they were even though the colours went with the files
+    // — nothing ever rendered them, as no shader declares aVertexColor.
+    sellated_dodecahedron: {
+        family: 'icosahedral', rhombic: true,
+        stellation: 1.1458980337503153   // 1 + phi^-4
+    },
+    sellated_octahedron: { family: 'octahedral', rhombic: true, stellation: 1.5 },
+    random_colored_st_dodec: {
+        family: 'icosahedral', corner_scales: [1, 0.631475730333306, 1]
+    },
+    random_colored_st_octa: {
+        family: 'octahedral', corner_scales: [1, 1 / 3, 1]
+    },
     // The spinner is drawn during loading and never gets a mirror overlay, so
     // it ships without mirror geometry, at coarser precision and without the
     // texture padding the other models carry.
@@ -59,25 +76,13 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
 export const GENERATED_MODEL_NAMES = Object.keys(MODEL_SPECS);
 
 // Models offered in the picker, in the order static/models/models.txt listed
-// them. Most are generated; the colour variants below predate the generator
-// and are not reproducible from it — `dodecahedron` and `icosahedron` are
-// randomly coloured near-copies of the `_a` meshes, and the `sellated_*` /
-// `random_colored_*` entries use stellation factors the driver no longer
-// records — so those keep loading from static/models/.
-export const LEGACY_MODEL_NAMES = [
-    'dodecahedron',
-    'icosahedron',
-    'random_colored_st_dodec',
-    'random_colored_st_octa',
-    'sellated_dodecahedron',
-    'sellated_octahedron'
-];
-
+// them before everything moved into the generator. The old `dodecahedron` and
+// `icosahedron` entries are gone: they were the `_a` meshes with a colour
+// array the renderer never read, so they were duplicates of entries already
+// here.
 export const SELECTABLE_MODEL_NAMES = [
     'cube',
-    'dodecahedron',
     'dodecahedron_a',
-    'icosahedron',
     'icosahedron_a',
     'octahedron',
     'random_colored_st_dodec',

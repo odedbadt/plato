@@ -1,5 +1,4 @@
 import * as THREE from 'three'
-import { Model } from './webgl_utils'
 import {
   ModelSpec, generate_edges, generate_edges_from_spec, is_generated_model
 } from './symmetry'
@@ -10,24 +9,14 @@ import {
 // naive "draw every triangle edge" wireframe shows the tessellation rather than
 // the polyhedron. Only the *feature* edges belong in a wireframe.
 //
-// There are two ways to find them, and which one applies depends on where the
-// model came from:
-//
-//   Generated models ask the symmetry group directly. Every triangle is a copy
-//   of one fundamental triangle, so classifying its three edges once settles
-//   the whole solid exactly — see crease_slots() in symmetry/geometry.ts.
-//
-//   The six legacy JSON models have no generator behind them, so they fall back
-//   to measuring dihedral angles on the welded mesh. That works here (the
-//   angles are strongly bimodal) but it is a threshold against geometry that
-//   has already been rounded to 3 decimals, where the exact test is neither.
-//
-// Both paths finish the same way: weld the collinear runs that face
-// subdivision left behind back into single segments.
+// Every model is generated, so the edges come from the symmetry group rather
+// than from measuring the mesh: each triangle is a copy of one in the base
+// domain, which settles the whole solid exactly — see crease_slots() and
+// transformations_to_edges() in symmetry/geometry.ts, and wythoff_edges() for
+// the seed-point path. Afterwards the collinear runs that face subdivision
+// left behind are welded back into single segments.
 
 const QUANT = 1e5;        // vertex welding precision
-const EDGE_KEY_STRIDE = 1e6;   // > any vertex count in these models
-const COPLANAR_COS = Math.cos(Math.PI / 180);   // 1 degree
 const COLLINEAR_COS = Math.cos(Math.PI / 180);
 
 type Vec3 = [number, number, number];
@@ -41,21 +30,11 @@ export type EdgeSet = {
   radius: number,
 };
 
-function face_normal(v: Array<number>, b: number): Vec3 {
-  const ux = v[b + 3] - v[b], uy = v[b + 4] - v[b + 1], uz = v[b + 5] - v[b + 2];
-  const wx = v[b + 6] - v[b], wy = v[b + 7] - v[b + 1], wz = v[b + 8] - v[b + 2];
-  const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
-  const l = Math.hypot(nx, ny, nz) || 1;
-  return [nx / l, ny / l, nz / l];
-}
-
-// Where a model's edges can be asked for exactly: a registered model's name,
-// or a spec the shape controls have edited. Absent (or a legacy JSON model)
-// falls back to measuring the mesh.
+// Where a model's edges are asked for: a registered model's name, or a spec
+// the shape controls have edited.
 export type EdgeSource = string | ModelSpec;
 
-// Dispatch: exact when the generator knows the model, measured otherwise.
-export function extract_edges(model: Model, source?: EdgeSource): EdgeSet {
+export function extract_edges(source?: EdgeSource): EdgeSet {
     if (typeof source === 'string') {
         if (is_generated_model(source)) {
             return edges_from_symmetry(generate_edges(source));
@@ -63,7 +42,8 @@ export function extract_edges(model: Model, source?: EdgeSource): EdgeSet {
     } else if (source) {
         return edges_from_symmetry(generate_edges_from_spec(source));
     }
-    return edges_from_dihedral(model);
+    // No generator behind this model: nothing to draw rather than a guess.
+    return { starts: new Float32Array(0), ends: new Float32Array(0), count: 0, radius: 1 };
 }
 
 // Edges swept from the fundamental triangle's crease slots. Each one arrives
@@ -116,72 +96,6 @@ function to_edge_set(
         ends[i * 3] = points[b][0]; ends[i * 3 + 1] = points[b][1]; ends[i * 3 + 2] = points[b][2];
     }
     return { starts, ends, count, radius: radius || 1 };
-}
-
-// Fallback for the legacy JSON models: keep edges whose two adjacent faces are
-// not coplanar, plus boundary edges.
-function edges_from_dihedral(model: Model): EdgeSet {
-  const v = model.vertices;
-  const n_tri = Math.floor(v.length / 9);
-
-  // Weld vertices by quantized position
-  const vert_ids = new Map<string, number>();
-  const points: Vec3[] = [];
-  let radius = 0;
-  const vert_id = (b: number): number => {
-    const x = v[b], y = v[b + 1], z = v[b + 2];
-    const key = `${Math.round(x * QUANT)},${Math.round(y * QUANT)},${Math.round(z * QUANT)}`;
-    let id = vert_ids.get(key);
-    if (id === undefined) {
-      id = points.length;
-      points.push([x, y, z]);
-      vert_ids.set(key, id);
-      radius = Math.max(radius, Math.hypot(x, y, z));
-    }
-    return id;
-  };
-
-  // Collect each undirected edge's adjacent face normals
-  const adjacency = new Map<number, { a: number, b: number, normals: Vec3[] }>();
-  for (let t = 0; t < n_tri; t++) {
-    const b = t * 9;
-    const nrm = face_normal(v, b);
-    const ids = [vert_id(b), vert_id(b + 3), vert_id(b + 6)];
-    for (let e = 0; e < 3; e++) {
-      const p = ids[e], q = ids[(e + 1) % 3];
-      if (p === q) continue;   // degenerate triangle
-      const lo = Math.min(p, q), hi = Math.max(p, q);
-      // Stable pair key. points.length grows as vertices are welded in, so
-      // using it here would hash the same edge differently depending on when
-      // it was seen, splitting an edge's two faces into separate buckets.
-      const key = lo * EDGE_KEY_STRIDE + hi;
-      let entry = adjacency.get(key);
-      if (!entry) {
-        entry = { a: lo, b: hi, normals: [] };
-        adjacency.set(key, entry);
-      }
-      entry.normals.push(nrm);
-    }
-  }
-
-  // Keep boundary edges and creases; drop edges interior to a flat face
-  const kept: Array<[number, number]> = [];
-  for (const { a, b, normals } of adjacency.values()) {
-    if (normals.length === 1) { kept.push([a, b]); continue; }
-    const n0 = normals[0];
-    let crease = false;
-    for (let i = 1; i < normals.length; i++) {
-      const m = normals[i];
-      // Unsigned: winding may differ between the two adjacent faces
-      if (Math.abs(n0[0] * m[0] + n0[1] * m[1] + n0[2] * m[2]) < COPLANAR_COS) {
-        crease = true;
-        break;
-      }
-    }
-    if (crease) kept.push([a, b]);
-  }
-
-  return to_edge_set(weld_collinear(kept, points), points, radius);
 }
 
 // Subdivision splits one polyhedron edge into several collinear segments. Join

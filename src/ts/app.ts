@@ -3,8 +3,7 @@ import * as webgl_utils from './webgl_utils'
 import { WebglRenderer, WireframeOptions, DEFAULT_WIREFRAME_OPTIONS } from './webgl_renderer'
 import {
   ModelSpec, Vec3, corner_orders, generate_model, generate_model_from_spec,
-  get_model_spec, is_generated_model, stellation_factor,
-  GENERATED_MODEL_NAMES, SELECTABLE_MODEL_NAMES
+  get_model_spec, stellation_factor, SELECTABLE_MODEL_NAMES
 } from './symmetry'
 function parse_RGBA(color: string): [number, number, number, number] {
   const canvas = document.createElement('canvas');
@@ -140,6 +139,23 @@ function set_input_checked(id: string, value: boolean) {
   if (input) input.checked = value;
 }
 
+// Models used to be fetched and cached in localStorage. They are all generated
+// now, so anything left under these keys is dead weight against a quota the
+// app no longer uses at all — around 350KB of it in a browser that ran the old
+// version. Swept once on startup; harmless after the first run.
+function drop_stale_model_cache() {
+  const stale = ['all_model_names', 'model_list',
+    'cube', 'dodecahedron', 'dodecahedron_a', 'icosahedron', 'icosahedron_a',
+    'octahedron', 'spinner', 'tetra_b',
+    'random_colored_st_dodec', 'random_colored_st_octa',
+    'sellated_dodecahedron', 'sellated_octahedron',
+    'stellated_dodecahedron', 'stellated_octahedron'];
+  for (const key of stale) {
+    localStorage.removeItem(key);
+    localStorage.removeItem(`static/models/${key}.json`);
+  }
+}
+
 export class App {
   prefered_model_name: string;
   model: any;
@@ -149,7 +165,6 @@ export class App {
   pen_radius: number;
   dpr: number;
   is_spinning: boolean;
-  cache: Storage;
   model_names: string[] | null = null;
   spinner_model: any = null;
   is_dirty: boolean = false;
@@ -187,36 +202,13 @@ export class App {
     this.dpr = window.devicePixelRatio;
     this.spinning_speed = 0;
     this.is_spinning = false;
-    this.cache = localStorage;
-  }
-  construct_url_for_name(model_name: string): string {
-    return `static/models/${model_name}.json`
-  }
-  // Generated models are built on demand — enumerating a reflection group and
-  // sweeping its fundamental triangle costs a couple of milliseconds, less than
-  // parsing the JSON it replaces, so there is nothing worth caching. Only the
-  // hand-coloured legacy models still come off the network.
-  load_model_by_name(model_name: string, callback: (model: any) => void) {
-    if (is_generated_model(model_name)) {
-      callback(generate_model(model_name));
-      return
-    }
-    this.load_model(this.construct_url_for_name(model_name), callback);
-  }
-  warmup_cache(model_names: string[]) {
-    const _this = this;
-    Array.from(model_names).forEach((model_name: string) => {
-      if (is_generated_model(model_name)) return
-      _this.load_model(_this.construct_url_for_name(model_name), (model: any) => {
-        _this.cache.setItem(model_name, JSON.stringify(model))
-      })
-    })
   }
   load_spinner_model() {
     this.spinner_model = generate_model('spinner');
   }
   init() {
     const _this = this;
+    drop_stale_model_cache();
     this.init_canvas_sizes();
 
     // Initialize WebGL renderer with cached shader programs
@@ -230,21 +222,13 @@ export class App {
     this.init_palette();
     this.init_texture_sketcher();
     this.init_actions();
-    let prefered_model_name_there = false;
-    this.load_model_names((model_names: string[]) => {
+    const model_names = SELECTABLE_MODEL_NAMES.slice();
+    {
       this.model_names = model_names;
-      this.cache.setItem('all_model_names', JSON.stringify(model_names));
-      for (const model_name of model_names) {
-        if (model_name == this.prefered_model_name) {
-          prefered_model_name_there = true
-        }
-      }
-      const first_model = prefered_model_name_there ?
+      const first_model = model_names.includes(this.prefered_model_name) ?
         this.prefered_model_name :
         model_names[0]
 
-      // Warmup cache
-      _this.warmup_cache(model_names);
       _this.load_spinner_model();
 
       const container = document.getElementById('model-select-container');
@@ -278,9 +262,7 @@ export class App {
         _this.is_dirty = true;
         _this.init_animation_loop();
       });
-
-
-    })
+    }
   }
   init_animation_loop() {
     const _this = this;
@@ -292,39 +274,6 @@ export class App {
     }
     requestAnimationFrame(animate)
   }
-  load_model(model_url: string, callback: (model: any) => void) {
-    const cached = this.cache.getItem(model_url);
-    if (cached) {
-      callback(JSON.parse(cached));
-      return
-    }
-    fetch(`${model_url}#'${Date.now()}`)
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`HTTP error! Status: ${response.status}`);
-        }
-        return response.json(); // Parse JSON from the response
-      })
-      .then(data => {
-        callback(data); // Handle the JSON data
-      })
-      .catch(error => {
-        console.error('Error fetching data:', error); // Handle errors
-      });
-  }
-  load_model_names(callback: (model_names: string[]) => void) {
-    // The list used to be fetched from static/models/models.txt; it now comes
-    // from the model registry, so a stale cached copy cannot mask it. Entries
-    // cached back when these models were downloaded are dead weight against the
-    // localStorage quota, so drop them too.
-    this.cache.removeItem('model_list');
-    for (const model_name of GENERATED_MODEL_NAMES) {
-      this.cache.removeItem(model_name);
-      this.cache.removeItem(this.construct_url_for_name(model_name));
-    }
-    callback(SELECTABLE_MODEL_NAMES.slice());
-  }
-
   load_and_set_model(model_name: string, ready_callback: () => void) {
     if (this.interval_id) {
       window.clearInterval(this.interval_id);
@@ -341,18 +290,11 @@ export class App {
       this.set_model(this.spinner_model, 'spinner');
     }
     //this.set_spinning_speed(.035);
-    const _this = this
-    this.load_model_by_name(model_name,
-      (model: any) => {
-        if (!is_generated_model(model_name)) {
-          _this.cache.setItem(model_name, JSON.stringify(model));
-        }
-        _this.set_model(model, model_name)
-        _this.base_spec = get_model_spec(model_name);
-        _this.live_spec = _this.base_spec ? { ..._this.base_spec } : null;
-        _this.sync_shape_controls();
-        ready_callback()
-      })
+    this.set_model(generate_model(model_name), model_name);
+    this.base_spec = get_model_spec(model_name);
+    this.live_spec = this.base_spec ? { ...this.base_spec } : null;
+    this.sync_shape_controls();
+    ready_callback();
   }
   set_spinning_speed(spinning_speed: number) {
     this.spinning_speed = spinning_speed || 0
@@ -506,18 +448,7 @@ export class App {
   // console.log(pen_size)
   // this.pen_pen_size = pen_size;
 
-  // Resolves with the model, generating it when possible and otherwise
-  // falling back to the name-based cache and then the network.
-  load_model_promise(model_name: string): Promise<any> {
-    if (is_generated_model(model_name)) {
-      return Promise.resolve(generate_model(model_name));
-    }
-    const cached = this.cache.getItem(model_name);
-    if (cached) return Promise.resolve(JSON.parse(cached));
-    return new Promise((resolve) => {
-      this.load_model(this.construct_url_for_name(model_name), resolve);
-    });
-  }
+
 
   async open_model_picker() {
     const overlay = document.getElementById('model-picker-overlay');
@@ -544,8 +475,7 @@ export class App {
     const uniforms = webgl_utils.matrix_uniforms(rot);
 
     for (const name of model_names) {
-      const model = await this.load_model_promise(name);
-      if (!model?.vertices) continue;
+      const model = generate_model(name);
 
       thumb_renderer.begin_frame();
       thumb_renderer.draw_model(model, uniforms);

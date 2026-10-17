@@ -241,6 +241,16 @@ export function fundamental_triangle(
         : scale(m0xm1, dot(m0xm1, m1xm2));
     if (stellation !== 1) v2 = scale(v2, stellation);
 
+    // Radial scale per corner, applied before the triangle is renormalised.
+    // Two of the shipped models pull a corner in by a factor the formulas
+    // above cannot produce; see MODEL_SPECS.
+    const scales = options.corner_scales;
+    if (scales) {
+        v0 = scale(v0, scales[0]);
+        v1 = scale(v1, scales[1]);
+        v2 = scale(v2, scales[2]);
+    }
+
     const max_norm = Math.max(norm(v0), norm(v1), norm(v2));
     v0 = scale(v0, factor / max_norm);
     v1 = scale(v1, factor / max_norm);
@@ -324,6 +334,10 @@ export type MeshOptions = {
     // 1 is the plain solid, 2 what `stellated: true` gives. See
     // stellation_factor().
     stellation?: number,
+    // Radial scale for each corner of the fundamental triangle, in corner
+    // order. `stellation` is the corner-2 case with its own name because it is
+    // the one worth a slider.
+    corner_scales?: [number, number, number],
     // Barycentric weights of a Wythoff seed point on the fundamental triangle.
     // Present means the solid comes from symmetry/wythoff.ts instead of from
     // sweeping the triangle itself, and `stellated` / `dual` / `rhombic` no
