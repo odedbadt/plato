@@ -137,6 +137,7 @@ body.paper .floating-btn.active {
 }
 
 #wireframe-options .slider-row,
+#plane-options .slider-row,
 #shape-options .slider-row {
   display: flex;
   align-items: center;
@@ -144,6 +145,7 @@ body.paper .floating-btn.active {
 }
 
 #wireframe-options .slider-row label,
+#plane-options .slider-row label,
 #shape-options .slider-row label {
   flex: 0 0 6.5em;
   margin-left: 0;
@@ -151,6 +153,7 @@ body.paper .floating-btn.active {
 }
 
 #wireframe-options .slider-row input[type=range],
+#plane-options .slider-row input[type=range],
 #shape-options .slider-row input[type=range] {
   flex: 1 1 auto;
   min-width: 0;
@@ -339,6 +342,7 @@ legend {
 
 #rendering-options label,
 #wireframe-options label,
+#plane-options label,
 #shape-options label {
   color: #ccc;
   font-size: 13px;
@@ -347,12 +351,14 @@ legend {
 
 #rendering-options > div,
 #wireframe-options > div,
+#plane-options > div,
 #shape-options > div {
   margin: 8px 0;
 }
 
 #rendering-options input,
 #wireframe-options input,
+#plane-options input,
 #shape-options input {
   accent-color: #448AFF;
 }
@@ -492,4 +498,60 @@ legend {
   fieldset {
     padding: 10px;
   }
+}
+
+/* The Coxeter triple. Three numbers decide everything downstream — including
+   which of the two kernels draws them — so they get their own row rather than
+   hiding inside the picker. */
+#triple-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+#triple-row .triple-pi {
+  color: #ccc;
+  font-size: 13px;
+}
+
+#triple-row input[type=number] {
+  width: 3.4em;
+  background: #2a2a2a;
+  color: #eee;
+  border: 1px solid #555;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 13px;
+}
+
+#triple-note,
+#plane-status {
+  color: #999;
+  font-size: 11px;
+  line-height: 1.4;
+  max-width: 200px;
+  margin-top: 6px;
+}
+
+#hyper-projection {
+  width: 100%;
+  max-width: 200px;
+}
+
+/* Stellation, duals and the size knobs all vary the fundamental triangle of a
+   finite solid; a tiling's cell is fixed by its angles — up to scale, which
+   the Euclidean kernel exposes as its own control — so they have nothing to
+   act on there. The seed pad does, and stays. */
+body.planar #shape-options .spherical-only {
+  display: none;
+}
+
+/* The two plane kernels share a panel, since most of what it offers is the
+   same question. What differs is the one knob each has that the other does
+   not: a projection and a depth for the hyperbolic plane, which is bounded
+   and has two models worth drawing, and a cell size for the Euclidean one,
+   which is neither. */
+body:not(.hyperbolic) #plane-options .hyperbolic-only,
+body:not(.euclidean) #plane-options .euclidean-only {
+  display: none;
 }
