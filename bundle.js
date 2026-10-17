@@ -6975,7 +6975,8 @@ function translation(dx, dy) {
     return [1, 0, dx, 0, 1, dy, 0, 0, 1];
 }
 // Orientation-reversing exactly when the linear part flips the plane, which is
-// what the checker shading reads.
+// what the checker shading reads — of the placement `view * cell`, not of the
+// cell on its own; see build_euclidean().
 function determinant(m) {
     return m[0] * m[4] - m[1] * m[3];
 }
@@ -7263,6 +7264,11 @@ function build_euclidean(spec) {
     const tiling = enumerate_tiling(group, radius, spec.view ?? IDENTITY.slice(), max_cells);
     const { cells, view } = tiling;
     const at = (p) => apply(view, p);
+    // Same as the hyperbolic kernel: the checker must follow the handedness a
+    // cell is drawn with, det(view * cell), because fold_view() flips det(view)
+    // at every mirror the viewer pans across while det(cell) stays put. One
+    // hoisted sign, since det(view) is constant for the frame.
+    const view_reversed = determinant(view) < 0;
     const wythoff = spec.seed ? wythoff_base(group.mirrors, group.corners, spec.seed) : null;
     const base = (wythoff ? wythoff.triangles : classic_base(group.corners))
         .filter(t => !degenerate(t.points));
@@ -7287,7 +7293,8 @@ function build_euclidean(spec) {
         const outline = group.corners.map(p => at(apply(cell, p)));
         if (bbox_outside(outline, viewport, 0.05))
             continue;
-        const normal = (checker && determinant(cell) < 0) ? mirrored_normal : direct_normal;
+        const normal = (checker && ((determinant(cell) < 0) !== view_reversed))
+            ? mirrored_normal : direct_normal;
         for (const piece of base) {
             for (let k = 0; k < 3; k++) {
                 const p = at(apply(cell, piece.points[k]));
@@ -8251,9 +8258,10 @@ function checker_normals(tilt) {
             tilt * l[2] + k * perp[2]
         ]];
 }
-// Mirror images are precisely the orientation-reversing elements of the
-// group, so the determinant settles which class a cell is in with no
-// bookkeeping to carry through the enumeration.
+// Mirror images are precisely the orientation-reversing elements of the group,
+// so a determinant settles which class a placement is in with no bookkeeping to
+// carry through the enumeration. The placement is `view * cell`, though, not the
+// cell on its own — see build_hyperbolic().
 function determinant(m) {
     return m[0] * (m[4] * m[8] - m[5] * m[7])
         - m[1] * (m[3] * m[8] - m[5] * m[6])
@@ -8402,6 +8410,16 @@ function build_hyperbolic(spec) {
     const mirrors = place_mirrors_minkowski(spec.x, spec.y, spec.z);
     const tiling = enumerate_tiling(mirrors, cutoff, spec.view ?? IDENTITY.slice(), max_cells);
     const { corners, cells, view } = tiling;
+    // The checker has to track the handedness a cell is actually DRAWN with,
+    // which is that of `view * cell` and not of `cell` alone. fold_view() keeps
+    // the view canonical by reflecting the viewer back into the fundamental
+    // triangle, so crossing a mirror while panning multiplies the view by a
+    // reflection and flips det(view) — while the enumerated cells are always
+    // the same BFS out from the identity, so det(cell) does not move with it.
+    // Shading on det(cell) alone therefore inverted the whole checkerboard at
+    // every mirror crossing. det(view) is fixed for the frame, so the one sign
+    // hoists out of the loop instead of multiplying matrices per cell.
+    const view_reversed = determinant(view) < 0;
     const viewport = spec.viewport ?? VIEWPORTS[projection];
     const at = (v) => project(mat_apply(view, v), projection);
     const wythoff = spec.seed ? wythoff_base(mirrors, corners, spec.seed) : null;
@@ -8435,7 +8453,7 @@ function build_hyperbolic(spec) {
         if (bbox_outside(outline, viewport, 0.1))
             continue;
         const level = subdivision_level(frame, view, projection, tolerance, max_level);
-        const normal = (checker && determinant(cell) < 0)
+        const normal = (checker && ((determinant(cell) < 0) !== view_reversed))
             ? mirrored_normal : direct_normal;
         for (const piece of base) {
             const image = piece.points.map(v => mat_apply(cell, v));
