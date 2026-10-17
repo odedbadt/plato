@@ -115,8 +115,29 @@ A blank tiling shaded flat is a plain white disc, so reflected cells are dimmed
 apart from direct ones (`checker_normals()`). This needs no new shader: the
 existing one shades by how far a normal is turned from the lamp, so tilting the
 reflected cells' normals off it dims them by a fixed amount. Mirror images are
-exactly the orientation-reversing elements, so `det(cell) < 0` settles which is
-which.
+exactly the orientation-reversing elements, so a determinant settles which is
+which — but of the **placement**, `view * cell`, not of `cell` on its own.
+
+Reading `det(cell)` is the obvious thing and it is wrong, which cost a session
+to find. `fold_view()` keeps the view canonical by reflecting the viewer back
+into the fundamental triangle, so panning across a mirror multiplies the view by
+a reflection and flips `det(view)`; meanwhile the enumerated cells are always
+the same BFS out from the identity, so `det(cell)` does not move with it. The
+two labels detach and **the entire checkerboard inverts in one frame** at every
+mirror crossing — which while panning is constantly, and reads as the
+fundamental set shifting. Measured on the shipped mesh, 25-41% of cells followed
+across a pan step changed shade. `det(view * cell)` is the placement's own
+determinant and is invariant under which representative the fold picked, since
+`det(view * g * g^-1 * cell) = det(view * cell)`; it measures 0 flips. As
+`det(view)` is fixed for the frame, both kernels hoist one `view_reversed`
+boolean out of the cell loop rather than multiplying matrices per cell, so the
+fix is free.
+
+The fold is not what needs changing — `det(view)` changing sign is correct
+behaviour for a canonical fold, and the enumeration and keying are right too.
+Only the shading rule read the wrong matrix. Note that the test for this must
+follow a cell through a pan in a frame that does not move (undo the accumulated
+raw pan); comparing frames in screen coordinates just sees the pan.
 
 Mirror lines are the dominant cost — a tiling's mirrors outnumber its faces
 several times over, where a solid's are a fixed 15 — so they are only built when

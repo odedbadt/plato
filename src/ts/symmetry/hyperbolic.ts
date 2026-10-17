@@ -545,9 +545,10 @@ function checker_normals(tilt: number): [Vec3, Vec3] {
     ]];
 }
 
-// Mirror images are precisely the orientation-reversing elements of the
-// group, so the determinant settles which class a cell is in with no
-// bookkeeping to carry through the enumeration.
+// Mirror images are precisely the orientation-reversing elements of the group,
+// so a determinant settles which class a placement is in with no bookkeeping to
+// carry through the enumeration. The placement is `view * cell`, though, not the
+// cell on its own — see build_hyperbolic().
 function determinant(m: Mat3): number {
     return m[0] * (m[4] * m[8] - m[5] * m[7])
         - m[1] * (m[3] * m[8] - m[5] * m[6])
@@ -732,6 +733,17 @@ export function build_hyperbolic(spec: HyperbolicSpec): HyperbolicResult {
         mirrors, cutoff, spec.view ?? IDENTITY.slice(), max_cells);
     const { corners, cells, view } = tiling;
 
+    // The checker has to track the handedness a cell is actually DRAWN with,
+    // which is that of `view * cell` and not of `cell` alone. fold_view() keeps
+    // the view canonical by reflecting the viewer back into the fundamental
+    // triangle, so crossing a mirror while panning multiplies the view by a
+    // reflection and flips det(view) — while the enumerated cells are always
+    // the same BFS out from the identity, so det(cell) does not move with it.
+    // Shading on det(cell) alone therefore inverted the whole checkerboard at
+    // every mirror crossing. det(view) is fixed for the frame, so the one sign
+    // hoists out of the loop instead of multiplying matrices per cell.
+    const view_reversed = determinant(view) < 0;
+
     const viewport = spec.viewport ?? VIEWPORTS[projection];
     const at = (v: Vec3): [number, number] => project(mat_apply(view, v), projection);
 
@@ -769,7 +781,7 @@ export function build_hyperbolic(spec: HyperbolicSpec): HyperbolicResult {
         if (bbox_outside(outline, viewport, 0.1)) continue;
 
         const level = subdivision_level(frame, view, projection, tolerance, max_level);
-        const normal = (checker && determinant(cell) < 0)
+        const normal = (checker && ((determinant(cell) < 0) !== view_reversed))
             ? mirrored_normal : direct_normal;
 
         for (const piece of base) {

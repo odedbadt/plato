@@ -62,7 +62,8 @@ export function translation(dx: number, dy: number): Mat3 {
 }
 
 // Orientation-reversing exactly when the linear part flips the plane, which is
-// what the checker shading reads.
+// what the checker shading reads — of the placement `view * cell`, not of the
+// cell on its own; see build_euclidean().
 function determinant(m: Mat3): number {
     return m[0] * m[4] - m[1] * m[3];
 }
@@ -441,6 +442,12 @@ export function build_euclidean(spec: EuclideanSpec): EuclideanResult {
     const { cells, view } = tiling;
     const at = (p: Point): Point => apply(view, p);
 
+    // Same as the hyperbolic kernel: the checker must follow the handedness a
+    // cell is drawn with, det(view * cell), because fold_view() flips det(view)
+    // at every mirror the viewer pans across while det(cell) stays put. One
+    // hoisted sign, since det(view) is constant for the frame.
+    const view_reversed = determinant(view) < 0;
+
     const wythoff = spec.seed ? wythoff_base(group.mirrors, group.corners, spec.seed) : null;
     const base = (wythoff ? wythoff.triangles : classic_base(group.corners))
         .filter(t => !degenerate(t.points));
@@ -467,7 +474,8 @@ export function build_euclidean(spec: EuclideanSpec): EuclideanResult {
     for (const cell of cells) {
         const outline = group.corners.map(p => at(apply(cell, p)));
         if (bbox_outside(outline, viewport, 0.05)) continue;
-        const normal = (checker && determinant(cell) < 0) ? mirrored_normal : direct_normal;
+        const normal = (checker && ((determinant(cell) < 0) !== view_reversed))
+            ? mirrored_normal : direct_normal;
 
         for (const piece of base) {
             for (let k = 0; k < 3; k++) {
