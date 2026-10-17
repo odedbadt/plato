@@ -8,11 +8,12 @@
 
 import { Mat3, Vec3 } from './linalg';
 import {
-    GeneratedModel, MeshOptions,
+    GeneratedModel, MeshOptions, SweptEdges,
     place_mirrors, perpendicular_to_mirror_matrix,
     mirror_matrices_to_group_transformations, transformations_to_mesh,
     transformations_to_edges
 } from './geometry';
+import { wythoff_mesh, wythoff_edges } from './wythoff';
 
 export type SymmetryFamily = 'icosahedral' | 'octahedral' | 'tetrahedral';
 
@@ -21,6 +22,15 @@ const FAMILY_ANGLES: Record<SymmetryFamily, [number, number, number]> = {
     octahedral: [4, 3, 2],  // group order 48
     tetrahedral: [3, 3, 2]  // group order 24
 };
+
+// Rotation order of the axis through each corner of the fundamental triangle,
+// in corner order. Corner k is where mirrors k+1 and k+2 meet; place_mirrors
+// separates mirrors 0 and 1 by pi/x, 0 and 2 by pi/y, and 1 and 2 by pi/z, so
+// corner 0 turns z-fold, corner 1 y-fold and corner 2 x-fold.
+export function corner_orders(family: SymmetryFamily): [number, number, number] {
+    const [x, y, z] = FAMILY_ANGLES[family];
+    return [z, y, x];
+}
 
 export type ModelSpec = MeshOptions & {
     family: SymmetryFamily
@@ -117,12 +127,16 @@ function spec_of(model_name: string): ModelSpec {
 // registered one. That is what the shape controls ride on.
 export function generate_model_from_spec(spec: ModelSpec): GeneratedModel {
     const { mirrors, transformations } = get_family(spec.family);
-    return transformations_to_mesh(mirrors, transformations, spec);
+    return spec.seed
+        ? wythoff_mesh(mirrors, transformations, spec)
+        : transformations_to_mesh(mirrors, transformations, spec);
 }
 
-export function generate_edges_from_spec(spec: ModelSpec) {
+export function generate_edges_from_spec(spec: ModelSpec): SweptEdges {
     const { mirrors, transformations } = get_family(spec.family);
-    return transformations_to_edges(mirrors, transformations, spec);
+    return spec.seed
+        ? wythoff_edges(mirrors, transformations, spec)
+        : transformations_to_edges(mirrors, transformations, spec);
 }
 
 export function generate_model(model_name: string): GeneratedModel {

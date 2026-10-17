@@ -348,6 +348,36 @@ legend {
   accent-color: #448AFF;
 }
 
+/* Seed pad. The classic controls describe the same solid a different way, so
+   only one set is live at a time. */
+#shape-options:not(.wythoff) .seed-sub {
+  display: none;
+}
+
+#shape-options.wythoff .classic-sub {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+#shape-seed-pad {
+  display: block;
+  width: 100%;
+  max-width: 180px;
+  height: 128px;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* The panel is shrink-to-fit, so an unconstrained line of prose would widen
+   the whole thing to its max-content width. */
+#shape-seed-hint {
+  max-width: 210px;
+  color: #888;
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
 /* Reset shape */
 #shape-reset {
   width: 100%;

@@ -32,8 +32,8 @@ const TRIANGLE_UVS = [0, 0, 0, 1, 1, 0];
 // Unit normals of three mirror planes meeting at angles pi/x, pi/y, pi/z.
 export function place_mirrors(x: number, y: number, z: number): Vec3[] {
     const a = Math.PI / x; // between mirrors 0 and 1
-    const b = Math.PI / y; // between mirrors 1 and 2
-    const c = Math.PI / z; // between mirrors 2 and 0
+    const b = Math.PI / y; // between mirrors 0 and 2
+    const c = Math.PI / z; // between mirrors 1 and 2
     // Angle between the (2,0) and (2,1) intersection lines.
     const C = Math.acos(
         (Math.cos(c) - Math.cos(a) * Math.cos(b)) / (Math.sin(a) * Math.sin(b))
@@ -279,12 +279,16 @@ export function crease_slots(triangle: FundamentalTriangle, mirrors: Vec3[]): bo
         Math.abs(dot(n, normalize(mirrors[index]))) > CREASE_EPSILON);
 }
 
+// Endpoint pairs of every edge of a solid, flat xyz triplets. The Wythoff
+// builder produces these too, so the wireframe takes either.
+export type SweptEdges = { starts: number[], ends: number[] };
+
 // Sweeps the fundamental triangle's crease edges through the whole group,
 // yielding every real edge of the solid and nothing else. Endpoints are
 // rounded like the mesh so the wireframe sits exactly on the surface.
 export function transformations_to_edges(
     mirrors: Vec3[], transformations: Mat3[], options: MeshOptions = {}
-): { starts: number[], ends: number[], edge_mirrors: number[] } {
+): SweptEdges & { edge_mirrors: number[] } {
     // Round no coarser than the mesh, but not as coarse as the spinner's 2
     // decimals: at factor 0.25 that is ~4% of the model, enough to fuse
     // distinct corners when the edges are welded.
@@ -320,6 +324,11 @@ export type MeshOptions = {
     // 1 is the plain solid, 2 what `stellated: true` gives. See
     // stellation_factor().
     stellation?: number,
+    // Barycentric weights of a Wythoff seed point on the fundamental triangle.
+    // Present means the solid comes from symmetry/wythoff.ts instead of from
+    // sweeping the triangle itself, and `stellated` / `dual` / `rhombic` no
+    // longer apply — where the seed sits says which solid this is.
+    seed?: Vec3,
     rhombic?: boolean,
     factor?: number,
     mirror_factor?: number,

@@ -2,8 +2,8 @@ import * as Glsl from './glsl'
 import * as webgl_utils from './webgl_utils'
 import { WebglRenderer, WireframeOptions, DEFAULT_WIREFRAME_OPTIONS } from './webgl_renderer'
 import {
-  ModelSpec, generate_model, generate_model_from_spec, get_model_spec,
-  is_generated_model, stellation_factor,
+  ModelSpec, Vec3, corner_orders, generate_model, generate_model_from_spec,
+  get_model_spec, is_generated_model, stellation_factor,
   GENERATED_MODEL_NAMES, SELECTABLE_MODEL_NAMES
 } from './symmetry'
 function parse_RGBA(color: string): [number, number, number, number] {
@@ -82,7 +82,40 @@ function project_to_sphere(x: number, y: number): glMatrix.vec3 {
 
 // Shape controls, by the kind of event they report changes with.
 const SHAPE_SLIDERS = ['shape-stellation', 'shape-size', 'shape-mirror-size'];
-const SHAPE_TOGGLES = ['shape-dual', 'shape-rhombic'];
+const SHAPE_TOGGLES = ['shape-dual', 'shape-rhombic', 'shape-seed-on'];
+
+// Where each corner of the fundamental triangle sits on the seed pad, as
+// fractions of its box. Corner k of the triangle is PAD_CORNERS[k].
+const PAD_CORNERS: Array<[number, number]> = [[0.15, 0.80], [0.85, 0.80], [0.50, 0.17]];
+const DEFAULT_SEED: Vec3 = [1, 1, 1];   // the middle: the omnitruncated solid
+
+// Barycentric weights of a point on the pad. Clamping the negatives away and
+// renormalising pins a drag that leaves the triangle to the nearest edge,
+// which is where the truncations live — a useful place to land rather than
+// somewhere to be stopped from reaching.
+function pad_to_barycentric(x: number, y: number): Vec3 {
+  const [[x0, y0], [x1, y1], [x2, y2]] = PAD_CORNERS;
+  const d = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2);
+  const raw: Vec3 = [
+    ((y1 - y2) * (x - x2) + (x2 - x1) * (y - y2)) / d,
+    ((y2 - y0) * (x - x2) + (x0 - x2) * (y - y2)) / d,
+    0
+  ];
+  raw[2] = 1 - raw[0] - raw[1];
+  const clamped: Vec3 = [Math.max(raw[0], 0), Math.max(raw[1], 0), Math.max(raw[2], 0)];
+  const sum = clamped[0] + clamped[1] + clamped[2] || 1;
+  return [clamped[0] / sum, clamped[1] / sum, clamped[2] / sum];
+}
+
+function barycentric_to_pad(seed: Vec3): [number, number] {
+  const sum = seed[0] + seed[1] + seed[2] || 1;
+  let x = 0, y = 0;
+  for (let k = 0; k < 3; k++) {
+    x += PAD_CORNERS[k][0] * seed[k] / sum;
+    y += PAD_CORNERS[k][1] * seed[k] / sum;
+  }
+  return [x, y];
+}
 
 function input_of(id: string): HTMLInputElement | null {
   return document.getElementById(id) as HTMLInputElement | null;
@@ -137,6 +170,8 @@ export class App {
   // JSON models, which have no generator to vary.
   base_spec: ModelSpec | null = null;
   live_spec: ModelSpec | null = null;
+  // Barycentric position of the Wythoff seed on the fundamental triangle.
+  seed: Vec3 = [...DEFAULT_SEED] as Vec3;
   // Multi-touch state
   active_pointers: Map<number, { x: number, y: number }> = new Map();
   rotating: boolean = false;
@@ -826,6 +861,82 @@ export class App {
       this.sync_shape_controls();
       this.regenerate_shape();
     });
+    this.init_seed_pad();
+  }
+
+  // The seed pad is the fundamental triangle drawn flat: dragging the dot
+  // moves the point whose orbit under the group is the solid's vertex set.
+  init_seed_pad() {
+    const pad = document.getElementById('shape-seed-pad') as HTMLCanvasElement | null;
+    if (!pad) return;
+    const seed_from_event = (event: PointerEvent) => {
+      const rect = pad.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      this.seed = pad_to_barycentric(
+        (event.clientX - rect.left) / rect.width,
+        (event.clientY - rect.top) / rect.height);
+      this.draw_seed_pad();
+      this.regenerate_shape();
+    };
+    pad.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      pad.setPointerCapture(event.pointerId);
+      seed_from_event(event);
+    });
+    pad.addEventListener('pointermove', (event) => {
+      if (event.buttons & 1) seed_from_event(event);
+    });
+  }
+
+  draw_seed_pad() {
+    const pad = document.getElementById('shape-seed-pad') as HTMLCanvasElement | null;
+    if (!pad || !this.base_spec) return;
+    const rect = pad.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    pad.width = Math.round(rect.width * this.dpr);
+    pad.height = Math.round(rect.height * this.dpr);
+    const context = pad.getContext('2d');
+    if (!context) return;
+    context.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    context.clearRect(0, 0, rect.width, rect.height);
+
+    const at = (k: number): [number, number] =>
+      [PAD_CORNERS[k][0] * rect.width, PAD_CORNERS[k][1] * rect.height];
+
+    context.beginPath();
+    context.moveTo(...at(0));
+    context.lineTo(...at(1));
+    context.lineTo(...at(2));
+    context.closePath();
+    context.fillStyle = 'rgba(255,255,255,0.06)';
+    context.fill();
+    context.strokeStyle = '#777';
+    context.lineWidth = 1;
+    context.stroke();
+
+    // Each corner is a rotation axis; its order says which regular solid the
+    // seed collapses onto there.
+    const orders = corner_orders(this.base_spec.family);
+    context.font = '11px monospace';
+    context.fillStyle = '#aaa';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    const centre: [number, number] = [rect.width / 2, rect.height / 2];
+    for (let k = 0; k < 3; k++) {
+      const [cx, cy] = at(k);
+      const dx = cx - centre[0], dy = cy - centre[1];
+      const length = Math.hypot(dx, dy) || 1;
+      context.fillText(`${orders[k]}`, cx + 11 * dx / length, cy + 11 * dy / length);
+    }
+
+    const [sx, sy] = barycentric_to_pad(this.seed);
+    context.beginPath();
+    context.arc(sx * rect.width, sy * rect.height, 5, 0, Math.PI * 2);
+    context.fillStyle = '#448AFF';
+    context.fill();
+    context.strokeStyle = '#fff';
+    context.lineWidth = 1.5;
+    context.stroke();
   }
 
   // Put the controls back to what the loaded model asks for, and hide them
@@ -840,17 +951,34 @@ export class App {
     set_input_value('shape-mirror-size', spec.mirror_factor ?? 1);
     set_input_checked('shape-dual', !!spec.dual);
     set_input_checked('shape-rhombic', !!spec.rhombic);
+    set_input_checked('shape-seed-on', !!spec.seed);
+    this.seed = (spec.seed ?? [...DEFAULT_SEED]) as Vec3;
+    this.sync_seed_mode();
+  }
+
+  // Seed mode and the classic controls are two descriptions of the same solid,
+  // so the panel shows which one is live.
+  sync_seed_mode() {
+    const on = input_checked('shape-seed-on');
+    document.getElementById('shape-options')?.classList.toggle('wythoff', on);
+    if (on) this.draw_seed_pad();
   }
 
   regenerate_shape() {
     if (!this.base_spec) return;
+    this.sync_seed_mode();
+    const seed_mode = input_checked('shape-seed-on');
     const spec: ModelSpec = {
       ...this.base_spec,
-      stellation: input_value('shape-stellation', stellation_factor(this.base_spec)),
       factor: input_value('shape-size', this.base_spec.factor ?? 1),
       mirror_factor: input_value('shape-mirror-size', this.base_spec.mirror_factor ?? 1),
-      dual: input_checked('shape-dual'),
-      rhombic: input_checked('shape-rhombic'),
+      // Where the seed sits already says whether the solid is dual, truncated
+      // or stellated-looking, so the classic knobs step aside in seed mode.
+      ...(seed_mode ? { seed: this.seed } : {
+        stellation: input_value('shape-stellation', stellation_factor(this.base_spec)),
+        dual: input_checked('shape-dual'),
+        rhombic: input_checked('shape-rhombic')
+      }),
       // Nothing downstream of here needs the JSON models' rounding, and it
       // costs more than the sweep itself.
       round: false
