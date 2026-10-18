@@ -76,6 +76,28 @@
     </svg>
   </button>
 
+  <!-- Floating tour button, at the foot of the stack: it is the one button
+       that is only ever wanted once, so it does not displace the others. -->
+  <button id="tour-btn" class="floating-btn" title="Guided tour">?</button>
+
+  <!-- Guided tour. The dim is the hole's own outward box-shadow, so whatever
+       is under the hole stays lit without being moved or re-parented. Only
+       the shell is here; the steps are in src/ts/tour.ts. -->
+  <div id="tour-overlay" class="hidden">
+    <div id="tour-hole"></div>
+    <div id="tour-card">
+      <div id="tour-progress"></div>
+      <div id="tour-title"></div>
+      <div id="tour-body"></div>
+      <div id="tour-buttons">
+        <button type="button" id="tour-skip">Skip</button>
+        <span id="tour-gap"></span>
+        <button type="button" id="tour-back">Back</button>
+        <button type="button" id="tour-next">Next &#9654;</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Model picker modal -->
   <div id="model-picker-overlay" class="hidden">
     <div id="model-picker-modal">
