@@ -30,19 +30,28 @@ in float fBrightness;
 
 out vec4 fragColor;
 uniform sampler2D uTexture;
+// The surface and the drawing on it are two independent layers of the same
+// pass: uSurface is the lit ground's own alpha, uInk scales the drawing's.
+// Both at 1 is the classic look; ink alone leaves the drawing standing in
+// space where the solid's surface was.
+uniform float uSurface;
+uniform float uInk;
 
 void main(void) {
     vec4 sampled = texture(uTexture, vTextureCoord);
-    // -    fragColor = vec4(
-    //   -      0.3+0.7*fBrightness * white_back,1.0);
+    float ink = sampled.a * uInk;
     vec3 shaded_back  = 0.3+0.7*vec3(fBrightness);
     vec3 shaded_front = 0.3+0.7*fBrightness * sampled.rgb;
-    float front_alpha =sampled.a; 
-    fragColor = vec4(shaded_front*front_alpha+shaded_back*(1.0-front_alpha), 1.0);
-    //fragColor = vec4(white_back,1.0);
+    // Ink over ground, where the ground itself may be transparent. The colour
+    // has to come out un-premultiplied for NormalBlending, so the composite is
+    // divided back out by its own alpha; at uSurface = 1 that cancels and this
+    // is exactly the plain shaded blend.
+    float alpha = ink + uSurface * (1.0 - ink);
+    if (alpha <= 0.001) discard;
+    vec3 rgb = (shaded_front * ink + shaded_back * uSurface * (1.0 - ink)) / alpha;
+    fragColor = vec4(rgb, alpha);
 }
 `
-
 
 export const FS_SOURCE_MIRRORS = `precision mediump float;
 in vec2 vTextureCoord;

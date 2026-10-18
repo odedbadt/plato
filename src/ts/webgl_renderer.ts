@@ -94,6 +94,8 @@ export class WebglRenderer {
         projector: { value: null },
         model_transformer: { value: null },
         uTexture: { value: this.texture },
+        uSurface: { value: 1.0 },
+        uInk: { value: 1.0 },
       },
       glslVersion: THREE.GLSL3,
       transparent: true,
@@ -233,8 +235,16 @@ export class WebglRenderer {
     return this.cached_model_geo!;
   }
 
-  draw_model(model: Model, uniforms: Uniforms) {
+  // The surface and the drawing on it are separately switchable. With the
+  // surface off the pass still runs over the same geometry, so the drawing
+  // keeps its place in space and its shading; it is only the lit ground
+  // underneath that goes. Lay down `draw_model_depth_only` first in that case,
+  // or the ink on the far side shows through the blank near side.
+  draw_model(model: Model, uniforms: Uniforms,
+             surface: boolean = true, ink: boolean = true) {
     this.apply_uniforms(this.main_material, uniforms);
+    this.main_material.uniforms.uSurface.value = surface ? 1.0 : 0.0;
+    this.main_material.uniforms.uInk.value = ink ? 1.0 : 0.0;
     this.render_pass(this.model_geometry(model), this.main_material, false);
   }
 
@@ -243,6 +253,10 @@ export class WebglRenderer {
   draw_model_depth_only(model: Model, uniforms: Uniforms) {
     this.apply_uniforms(this.main_material, uniforms);
     const geometry = this.model_geometry(model);
+    // Opaque ground, no ink: the shader discards fully transparent fragments,
+    // so this is what makes the whole surface land in the depth buffer.
+    this.main_material.uniforms.uSurface.value = 1.0;
+    this.main_material.uniforms.uInk.value = 0.0;
     this.main_material.colorWrite = false;
     this.render_pass(geometry, this.main_material, false);
     this.main_material.colorWrite = true;

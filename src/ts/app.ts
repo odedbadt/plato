@@ -85,6 +85,14 @@ function project_to_sphere(x: number, y: number): glMatrix.vec3 {
   return glMatrix.vec3.fromValues(x / r, y / r, 0);
 }
 
+// The three layers of the picture, each with a floating toggle in the main
+// view and a checkbox in the panel: [checkbox id, button id].
+const LAYER_BUTTONS: Array<[string, string]> = [
+  ['model', 'model-btn'],
+  ['texture', 'texture-btn'],
+  ['wireframe', 'wireframe-btn'],
+];
+
 // Shape controls, by the kind of event they report changes with.
 const SHAPE_SLIDERS = ['shape-stellation', 'shape-size', 'shape-mirror-size'];
 const SHAPE_TOGGLES = ['shape-dual', 'shape-rhombic', 'shape-seed-on'];
@@ -350,7 +358,7 @@ export class App {
         clear_btn?.addEventListener('click', () => _this.clear());
         // const cache_clear_btn = document.getElementById('clear-cache');
         // cache_clear_btn.addEventListener('click', () => localStorage.clear());
-        for (const id of ['model', 'wireframe', 'wireframe-mode', 'wf-hide-back']) {
+        for (const id of ['model', 'texture', 'wireframe', 'wireframe-mode', 'wf-hide-back']) {
           document.getElementById(id)?.addEventListener('change', () => { _this.is_dirty = true; })
         }
         // Whether the mirrors are shown is a rendering choice for a solid,
@@ -596,17 +604,19 @@ export class App {
     // Model picker open button
     document.getElementById('model-picker-btn')?.addEventListener('click', () => this.open_model_picker());
 
-    // Floating wireframe toggle, mirroring the checkbox in the controls panel
-    const wireframe_btn = document.getElementById('wireframe-btn');
-    const wireframe_checkbox = document.getElementById('wireframe') as HTMLInputElement;
-    wireframe_btn?.addEventListener('click', () => {
-      if (!wireframe_checkbox) return;
-      wireframe_checkbox.checked = !wireframe_checkbox.checked;
-      this.sync_wireframe_button();
-      this.is_dirty = true;
-    });
-    wireframe_checkbox?.addEventListener('change', () => this.sync_wireframe_button());
-    this.sync_wireframe_button();
+    // The floating layer toggles, mirroring the checkboxes in the controls
+    // panel. Either can flip; both read the same checkbox.
+    for (const [id, button_id] of LAYER_BUTTONS) {
+      const checkbox = document.getElementById(id) as HTMLInputElement | null;
+      document.getElementById(button_id)?.addEventListener('click', () => {
+        if (!checkbox) return;
+        checkbox.checked = !checkbox.checked;
+        this.sync_layer_buttons();
+        this.is_dirty = true;
+      });
+      checkbox?.addEventListener('change', () => this.sync_layer_buttons());
+    }
+    this.sync_layer_buttons();
 
     this.init_shape_controls();
 
@@ -1186,17 +1196,20 @@ export class App {
     this.sync_seed_mode();
   }
 
-  // The floating toggle, the ground and the dependent controls, all following
-  // the wireframe checkbox. A method rather than a closure in init_actions
-  // because the URL can set that checkbox long after the listeners are hooked
-  // up, and it has to look the same either way.
-  sync_wireframe_button() {
-    const on = input_checked('wireframe');
-    document.getElementById('wireframe-btn')?.classList.toggle('active', on);
+  // The floating toggles, the ground and the dependent controls, all
+  // following the three layer checkboxes. A method rather than a closure in
+  // init_actions because the URL can set those checkboxes long after the
+  // listeners are hooked up, and it has to look the same either way.
+  sync_layer_buttons() {
+    for (const [id, button_id] of LAYER_BUTTONS) {
+      document.getElementById(button_id)
+        ?.classList.toggle('active', input_checked(id));
+    }
+    const wireframe = input_checked('wireframe');
     // Ink on paper: the ground goes light while the wireframe is up.
-    document.body.classList.toggle('paper', on);
+    document.body.classList.toggle('paper', wireframe);
     // The style, weight and hide-back controls do nothing while it is off.
-    document.getElementById('wireframe-options')?.classList.toggle('off', !on);
+    document.getElementById('wireframe-options')?.classList.toggle('off', !wireframe);
   }
 
   // Seed mode and the classic controls are two descriptions of the same solid,
@@ -1240,6 +1253,7 @@ export class App {
       cell_size: this.euclid_scale,
       checker: this.checker,
       solid: input_checked('model'),
+      texture: input_checked('texture'),
       mirrors: input_checked('all-mirrors') ? 'a'
         : input_checked('generating-mirrors') ? 'g'
         : input_checked('no-mirrors') ? 'n' : '',
@@ -1286,6 +1300,7 @@ export class App {
     // loads, which is after the view half has run.
     if (url.seed) this.seed = url.seed.slice() as Vec3;
     if (url.solid !== undefined) set_input_checked('model', url.solid);
+    if (url.texture !== undefined) set_input_checked('texture', url.texture);
     if (url.mirrors !== undefined) {
       // The group starts with none of the three chosen, which is a state no
       // radio can be set to — so they are written one by one rather than by
@@ -1296,10 +1311,9 @@ export class App {
         set_input_checked(id, id === chosen);
       }
     }
-    if (url.wireframe !== undefined) {
-      set_input_checked('wireframe', url.wireframe);
-      this.sync_wireframe_button();
-    }
+    if (url.wireframe !== undefined) set_input_checked('wireframe', url.wireframe);
+    // One sync for all three, after whichever of them the link mentioned.
+    this.sync_layer_buttons();
     if (url.wireframe_mode) {
       const select = document.getElementById('wireframe-mode') as HTMLSelectElement | null;
       if (select) select.value = url.wireframe_mode;
@@ -1482,10 +1496,23 @@ export class App {
     // Begin frame
     this.renderer.begin_frame();
 
-    // Draw main model
-    const modelCheckbox = document.getElementById('model') as HTMLInputElement;
-    if (modelCheckbox?.checked && this.model) {
-      this.renderer.draw_model(this.model, uniforms);
+    // Draw main model. The lit surface and the drawing on it are separate
+    // layers of one pass, so either can be up without the other; drawing on
+    // the canvas never depended on them at all (pick_uv ray-casts the mesh on
+    // the CPU), so the pen works whatever is shown.
+    const show_surface = input_checked('model');
+    const show_ink = input_checked('texture');
+    // Whether the solid's own depth is in the buffer, which is what keeps the
+    // far side of it out of sight. Drawing the surface puts it there; drawing
+    // only the ink has to lay it down first, or the ink on the back shows
+    // through the blank front.
+    let depth_laid = false;
+    if (this.model && (show_surface || show_ink)) {
+      if (!show_surface) {
+        this.renderer.draw_model_depth_only(this.model, uniforms);
+      }
+      this.renderer.draw_model(this.model, uniforms, show_surface, show_ink);
+      depth_laid = true;
     }
 
     // Draw wireframe. After the model so solid faces hide the edges behind them,
@@ -1495,7 +1522,7 @@ export class App {
     if (wireframeCheckbox?.checked && this.model) {
       const wireframe_options = this.wireframe_options();
       // With the solid hidden, its depth alone still removes the back edges.
-      if (wireframe_options.hide_back && !modelCheckbox?.checked) {
+      if (wireframe_options.hide_back && !depth_laid) {
         this.renderer.draw_model_depth_only(this.model, uniforms);
       }
       // A tiling's edges were built with its mesh and come over directly;

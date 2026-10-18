@@ -204,6 +204,30 @@ Output matches the JSON it replaced exactly — vertices, normals and UVs are by
 2. `mirror_material` — Reflection plane geometry (cyan overlay)
 3. `overlay_material` — Drawing canvas as a fullscreen quad
 
+### The three layers
+
+The picture is the lit surface, the drawing on it and the wireframe, and each
+switches on its own — from a floating button in the main view, or from the
+panel's **Show** row. `LAYER_BUTTONS` in `app.ts` pairs the two and
+`sync_layer_buttons()` keeps them in step whichever one moved, the URL
+included. The pen never depended on any of them: `pick_uv()` ray-casts the
+mesh on the CPU, so a stroke lands wherever the pointer is over the solid
+whether or not it is being drawn.
+
+Surface and drawing are two layers of the *same* pass rather than two passes.
+`FS_SOURCE` composites ink over ground with `uSurface` as the ground's own
+alpha and `uInk` scaling the drawing's, and divides the result back out by its
+own alpha because `NormalBlending` wants an un-premultiplied colour; at
+`uSurface = 1` that division cancels and the shader is exactly the old blend,
+so the classic look is unchanged to the bit.
+
+With the surface off, `draw_model()` is preceded by `draw_model_depth_only()`.
+Without it the drawing on the far side shows through the blank near side,
+because a fully transparent fragment is discarded and so writes no depth. That
+prepass is the same one the wireframe's "hide edges round the back" uses, so
+`draw_model()` in `app.ts` tracks whether the solid's depth is already in the
+buffer rather than laying it twice.
+
 **`src/ts/glsl.ts`** — Raw GLSL shader strings. Directional lighting via dot-product normal shading; texture sampling with alpha blending.
 
 **`src/ts/webgl_utils.ts`** — Matrix math helpers (`gl-matrix`) and geometry conversion: `model_to_geometry()` converts a generated model → Three.js `BufferGeometry`, `matrix_uniforms()` computes projection/view/rotation matrices.
@@ -217,7 +241,7 @@ write.
 The drawing is not in it; a canvas does not fit in a URL. What is: the triple,
 the shape knobs (classic or seed), where the viewer stands (a quaternion for a
 solid, the view isometry for a tiling), the plane kernels' own settings, and
-what is drawn — model, mirrors, wireframe and its style.
+what is drawn — the three layers, the mirrors and the wireframe's style.
 
 Four things keep it short and stable:
 

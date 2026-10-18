@@ -35,8 +35,10 @@ export type UrlState = {
   cutoff: number,
   cell_size: number,
   checker: boolean,
-  // What gets drawn.
+  // What gets drawn. The surface, the drawing on it and the edges are three
+  // independent layers.
   solid: boolean,
+  texture: boolean,
   mirrors: string,
   wireframe: boolean,
   wireframe_mode: string,
@@ -76,6 +78,7 @@ const SCHEMA: Record<Field, Spec> = {
   cell_size: { key: 'cs', kind: 'number', decimals: 3 },
   checker: { key: 'ck', kind: 'bool' },
   solid: { key: 'm', kind: 'bool' },
+  texture: { key: 'tx', kind: 'bool' },
   mirrors: { key: 'mi', kind: 'text', allowed: ['', 'a', 'g', 'n'] },
   wireframe: { key: 'w', kind: 'bool' },
   wireframe_mode: {
@@ -105,6 +108,7 @@ export const DEFAULT_URL_STATE: UrlState = {
   cell_size: 0.22,
   checker: true,
   solid: true,
+  texture: true,
   mirrors: '',
   wireframe: false,
   wireframe_mode: 'depth-halo',
