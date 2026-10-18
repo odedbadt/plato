@@ -300,6 +300,78 @@ to the origin whenever the group changes under it — which on load it always
 does. The seed is in the late half for the mirror-image reason:
 `sync_shape_controls()` resets it to the preset's as the preset loads.
 
+**`src/ts/tour.ts`** — the guided tour, which is the only user-facing
+documentation the app has. It opens by itself on a first visit and from the
+`?` button after that; `index.html` holds the shell and `app.ts` the handles
+it is driven by.
+
+The whole design is one sentence: **a step is a deep link played in place.**
+`view` on a step is a URL hash in the codec `url_state.ts` reads, handed to
+`App.apply_view_hash()` — which is also what the `hashchange` listener calls,
+so what a link means is written down once. A step therefore costs a line of
+prose and a fragment, and `tour.ts` knows nothing about any control, where its
+state lives or what it does. It also cannot quietly drift: anything a shared
+link can reach a step reaches the same way, and anything it cannot reach is
+not in the URL either.
+
+Four things are worth knowing before changing it:
+
+1. **A step with no `view` means "whatever is already here"**, and what is
+   already here belongs to the last step that *did* name one. `applied_from`
+   tracks that step, not the current one. Re-applying the view every step is
+   the obvious thing and it undoes exactly what the viewless steps exist to
+   show — step 1 turns the solid and step 2 draws on it turned. The backwards
+   scan is still needed for stepping *back*, where the view in force belongs
+   to a later step than the one now being shown.
+2. **The dim and the lit cutout are one element.** `#tour-hole` is a
+   transparent box over the target carrying a 9999px outward `box-shadow`,
+   which paints everywhere except over the box itself. Nothing is lifted out
+   of the page to be highlighted, so a target keeps its own z-index, listeners
+   and position — which is what makes it safe to point at things inside the
+   scrolling panel. The overlay is `pointer-events: none` and only the card
+   takes clicks, so the page stays live underneath: "drag this" is worth
+   saying only if you can drag it while it is being said. Nothing can be
+   desynchronised by a stray click, because a step applies its own view when
+   it is entered. The picker modal is raised *above* the tour rather than
+   under it, since a modal behind the dim reads as broken.
+3. **The three demos are the residue** — the things a URL cannot describe
+   because they are motions rather than states: the turn, the stroke and a
+   knob moving on its own. They live on `App`, run off one interruptible
+   `tour_animate()`, and replay whenever their step is entered from either
+   direction. `tour_animate()` clamps its parameter at **both** ends: a
+   `requestAnimationFrame` timestamp is the frame's start time and can predate
+   the `performance.now()` taken moments earlier in the same turn, so the
+   first raw value comes out slightly negative — which `tour_seed()` turns
+   into `stations[-1]` and a `TypeError`.
+4. **The tour puts everything back.** `tour_capture()` is taken before the
+   first step moves anything and covers the view, the drawing and whether the
+   panel was open; both ways out restore it, so a run abandoned halfway leaves
+   no trace. The drawing travels as a canvas rather than `ImageData` because
+   the `ResizeObserver` rebuilds the texture canvas at the window's size, and
+   `drawImage` rescales where `putImageData` refuses.
+
+`tour_stroke()` paints into the texture directly rather than through synthetic
+pointer events, which keeps it off the `pick_uv` path — where a screen
+position reaches depends on which way the solid is facing, and the step before
+it has just turned it. The sampled part of the canvas is the triangle
+`u + v <= 1`: every fundamental triangle carries the UVs `(0,0)`, `(0,1)`,
+`(1,0)` (`TRIANGLE_UVS`, and `corner_uv()` in seed mode returns barycentrics,
+which sum to 1), and `create_canvas_texture()` sets `flipY = false`, so the
+surface reads the pixel at `(u*W, v*H)`.
+
+That same fact says something about the sketcher: its `mirror_path`, which
+reflects every stroke through `(x, y) -> (W - y, H - x)`, lands in the half
+with `u + v > 1` — the half nothing samples. The mirror symmetry you see is
+not that; it is the shared UVs, one mark appearing on all 120 copies. The
+second path is invisible work on every pointer move and every flood fill.
+
+On a narrow window the card docks across the foot of the screen and
+`body.tour-docked` lifts the panel clear of it with a `bottom`. Not a
+`padding-bottom`: the panel sizes its `max-height` on its content box, so
+padding makes it *taller* rather than giving it more to scroll, and the
+sections at its end stay behind the card — the one way a step can end up
+pointing at something invisible.
+
 ### Model Format
 
 Every model is generated at runtime by `src/ts/symmetry/`; `static/models/` is gone and nothing is fetched.

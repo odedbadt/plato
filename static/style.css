@@ -87,7 +87,17 @@ html, body {
 #wireframe-btn   { top: calc(max(16px, env(safe-area-inset-top)) + 162px); }
 #model-btn       { top: calc(max(16px, env(safe-area-inset-top)) + 216px); }
 #texture-btn     { top: calc(max(16px, env(safe-area-inset-top)) + 270px); }
+#tour-btn        { top: calc(max(16px, env(safe-area-inset-top)) + 324px); }
 .floating-btn.active { background: rgba(255,255,255,0.55); }
+
+/* The one floating button whose face is a glyph rather than a drawing: it
+   stands for the prose, not for anything in the picture. */
+#tour-btn {
+  font-family: monospace;
+  font-size: 22px;
+  font-weight: bold;
+  padding: 0;
+}
 
 /* Paper mode: the wireframe reads as ink on a page, so the canvas ground goes
    light — but only when the edges are the whole picture. With the solid shown
@@ -166,11 +176,138 @@ body.paper .floating-btn.active {
   margin: 0;
 }
 
+/* Guided tour.
+ *
+ * The dim and the lit cutout are one element: a transparent box over the
+ * target carrying a 9999px outward box-shadow, which paints everywhere
+ * except where the box itself is. So the thing being pointed at keeps its
+ * own z-index, its own listeners and its own position — nothing is lifted
+ * out of the page to be highlighted, which is what makes it safe to point
+ * at elements inside the scrolling panel.
+ *
+ * Above every other layer the app has except the picker modal, which is
+ * raised over the tour instead — see its own rule below.
+ */
+#tour-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  /* The page underneath stays live: the point of pointing at the canvas and
+     saying "drag this" is that you can drag it while it is being said. Only
+     the card takes clicks, and a step re-applies its own view when it is
+     entered, so there is nothing for a stray click to desynchronise. */
+  pointer-events: none;
+}
+#tour-overlay.hidden { display: none; }
+
+#tour-hole {
+  position: fixed;
+  border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.66);
+  outline: 2px solid #448AFF;
+  outline-offset: -1px;
+  pointer-events: none;
+  transition: left 0.2s ease, top 0.2s ease, width 0.2s ease, height 0.2s ease;
+}
+
+/* A step about the app rather than about a control: no cutout, so the dim
+   has to come from the overlay itself instead of from the hole's shadow. */
+#tour-overlay.no-target { background: rgba(0,0,0,0.66); }
+#tour-overlay.no-target #tour-hole { display: none; }
+
+#tour-card {
+  position: fixed;
+  pointer-events: auto;
+  width: min(330px, calc(100vw - 28px));
+  box-sizing: border-box;
+  background: rgba(22,22,22,0.98);
+  border: 1px solid #444;
+  border-radius: 12px;
+  padding: 14px 16px 12px;
+  color: #ddd;
+  font-family: monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+
+#tour-progress {
+  color: #777;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+#tour-title {
+  color: #fff;
+  font-size: 15px;
+  font-weight: bold;
+  margin: 2px 0 8px;
+}
+
+#tour-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+#tour-gap { flex: 1 1 auto; }
+
+#tour-buttons button {
+  border: none;
+  border-radius: 6px;
+  padding: 7px 12px;
+  background: #3a3a3a;
+  color: #eee;
+  font-family: monospace;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#tour-buttons button:hover { background: #4a4a4a; }
+#tour-buttons #tour-next { background: #448AFF; color: #06142c; font-weight: bold; }
+#tour-buttons #tour-next:hover { background: #5e9bff; }
+#tour-buttons #tour-skip { background: transparent; color: #888; padding-left: 0; }
+#tour-buttons #tour-skip:hover { color: #ccc; }
+
+/* Back is dead on the first step, where it is kept in place rather than
+   removed so the row does not jump on the way into the tour. */
+#tour-buttons button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Narrow windows: the panel goes full width, so there is no beside left to
+   put the card in and it docks across the foot of the screen. tour.ts sets
+   this class and then leaves left/top alone — the two cannot both own the
+   position, and the measured height a JS placement would need is not known
+   until after the width this rule sets. */
+#tour-card.docked {
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  width: auto;
+}
+
+/* The panel is held clear of the docked card rather than allowed to run
+   under it. A panel that ends behind the card cannot scroll its last
+   sections — the shape knobs, the wireframe style — out from behind it,
+   which is the one way a step can end up pointing at something invisible.
+   Note this is a `bottom`, not a `padding-bottom`: the panel sizes its
+   max-height on its content box, so padding would have made it taller
+   instead of giving it more to scroll. */
+body.tour-docked #controls-panel {
+  bottom: 250px;
+}
+
 /* Model picker modal */
 #model-picker-overlay {
   position: fixed;
   inset: 0;
-  z-index: 2000;
+  /* Above the tour, not under it: the tour leaves the page usable, so the
+     picker can be opened while a step is describing it, and a modal that
+     came up behind the dim would read as broken. */
+  z-index: 3100;
   background: rgba(0,0,0,0.85);
   display: flex;
   align-items: center;

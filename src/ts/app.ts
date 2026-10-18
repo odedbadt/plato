@@ -9,8 +9,10 @@ import {
   hyperbolic, euclidean
 } from './symmetry'
 import {
-  UrlState, DEFAULT_URL_STATE, read_url_state, schedule_url_write
+  UrlState, DEFAULT_URL_STATE, read_url_state, schedule_url_write,
+  decode_url_state, encode_url_state
 } from './url_state'
+import { init_tour, TourSnapshot } from './tour'
 function parse_RGBA(color: string): [number, number, number, number] {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = 1;
@@ -303,11 +305,7 @@ export class App {
     // without reloading anything, so without this the URL would be describing
     // a view the app is not in. Our own writes are replaceState, which does
     // not fire this.
-    window.addEventListener('hashchange', () => {
-      const changed: UrlState = { ...DEFAULT_URL_STATE, ...read_url_state() };
-      this.apply_url_view(changed);
-      this.apply_url_controls(changed);
-    });
+    window.addEventListener('hashchange', () => this.apply_view_hash(location.hash));
     this.init_canvas_sizes();
 
     // Initialize WebGL renderer with cached shader programs
@@ -375,6 +373,10 @@ export class App {
           document.getElementById(id)?.addEventListener('input', () => { _this.is_dirty = true; })
         }
         _this.is_dirty = true;
+        // Last, so a first-visit tour opens onto an app that is fully wired:
+        // its first step applies a view, and nothing can apply one until the
+        // preset and every control behind it exist.
+        init_tour(_this);
         _this.init_animation_loop();
       });
     }
@@ -1270,6 +1272,19 @@ export class App {
     };
   }
 
+  // A URL applied whole, as if it had just been pasted into the address bar.
+  // Both halves, in the order the second one's comment explains. The
+  // hashchange listener and every tour step come through here, so what a
+  // link means is written down once rather than in two places that can
+  // drift apart.
+  apply_view_hash(hash: string) {
+    const url: UrlState = {
+      ...DEFAULT_URL_STATE, ...decode_url_state(hash.replace(/^#/, ''))
+    };
+    this.apply_url_view(url);
+    this.apply_url_controls(url);
+  }
+
   // The half of a URL that lives on the app rather than in the DOM, applied
   // before the controls are hooked up — init_plane_controls() writes these
   // fields into their inputs as it goes, so setting them first is what puts
@@ -1564,6 +1579,185 @@ export class App {
     if (this.is_spinning && this.spinning_speed > 0) {
       this.is_dirty = true;
     }
+  }
+
+  // ---- The guided tour ----------------------------------------------------
+  //
+  // tour.ts owns the overlay and the script; what follows is the handle it
+  // drives the app with, and the whole of it. Everything a step changes
+  // about the *view* goes through apply_view_hash(), so a step is a deep
+  // link played in place and the tour never learns what a control does.
+  //
+  // What is left here is the two kinds of thing a link cannot carry: the
+  // motions, because a URL describes a state and these are changes of one;
+  // and the drawing, which is a canvas and does not fit in an address.
+
+  tour_animation: number | null = null;
+
+  // A step can be entered forwards or backwards and replays its demo either
+  // way, so an animation has to be interruptible rather than queued up
+  // behind whichever one is still running.
+  tour_cancel_animation() {
+    if (this.tour_animation !== null) cancelAnimationFrame(this.tour_animation);
+    this.tour_animation = null;
+  }
+
+  // Runs `step` over `ms`, with an eased parameter and the raw one. Eased is
+  // what a one-way motion wants; a knob that sweeps out and comes back is a
+  // cycle, and easing a cycle only makes it hurry through its own middle.
+  tour_animate(ms: number, step: (eased: number, raw: number) => void) {
+    this.tour_cancel_animation();
+    const start = performance.now();
+    const frame = (now: number) => {
+      // Clamped at both ends, and the low end is the one that bites: a
+      // requestAnimationFrame timestamp is the start of the frame, which can
+      // predate the performance.now() taken a moment earlier in the same
+      // turn. That makes the first raw value very slightly negative, which
+      // tour_seed() turns into stations[-1] and a TypeError.
+      const raw = Math.max(0, Math.min(1, (now - start) / ms));
+      const eased = raw < 0.5 ? 2 * raw * raw : 1 - 2 * (1 - raw) * (1 - raw);
+      step(eased, raw);
+      this.tour_animation = raw < 1 ? requestAnimationFrame(frame) : null;
+    };
+    this.tour_animation = requestAnimationFrame(frame);
+  }
+
+  // Everything the tour disturbs, so that a run abandoned halfway leaves no
+  // trace of itself.
+  tour_capture(): TourSnapshot {
+    const source = document.getElementById('textureCanvas') as HTMLCanvasElement | null;
+    let texture: HTMLCanvasElement | null = null;
+    if (source && source.width && source.height) {
+      texture = document.createElement('canvas');
+      texture.width = source.width;
+      texture.height = source.height;
+      texture.getContext('2d')?.drawImage(source, 0, 0);
+    }
+    return {
+      hash: encode_url_state(this.url_snapshot()),
+      texture,
+      panel_open:
+        !document.getElementById('controls-panel')?.classList.contains('hidden')
+    };
+  }
+
+  tour_restore(snapshot: TourSnapshot) {
+    this.apply_view_hash(snapshot.hash);
+    const target = document.getElementById('textureCanvas') as HTMLCanvasElement | null;
+    const context = target?.getContext('2d', { willReadFrequently: true });
+    if (target && context) {
+      context.clearRect(0, 0, target.width, target.height);
+      // drawImage rather than putImageData: the ResizeObserver rebuilds the
+      // texture canvas at the window's size, so a window moved during the
+      // tour leaves the copy and the canvas disagreeing, and drawImage
+      // rescales where putImageData refuses.
+      if (snapshot.texture) {
+        context.drawImage(snapshot.texture, 0, 0, target.width, target.height);
+      }
+      this.renderer?.mark_texture_dirty();
+    }
+    document.getElementById('controls-panel')
+      ?.classList.toggle('hidden', !snapshot.panel_open);
+    this.is_dirty = true;
+  }
+
+  // "Drag to turn it", done for you. Half a turn about the vertical, which
+  // is enough to show it is a solid and not a picture of one.
+  tour_turn() {
+    if (this.planar()) return;
+    const from = glMatrix.quat.clone(this.rotation);
+    const delta = glMatrix.quat.create();
+    glMatrix.quat.rotateY(delta, delta, Math.PI * 0.6);
+    const to = glMatrix.quat.multiply(glMatrix.quat.create(), delta, from);
+    this.tour_animate(1500, (eased) => {
+      glMatrix.quat.slerp(this.rotation, from, to, eased);
+      this.is_dirty = true;
+    });
+  }
+
+  // The stroke the tour draws for you, painted straight into the texture
+  // rather than through synthetic pointer events. That keeps it off the
+  // pick_uv path, where which part of the canvas a screen position reaches
+  // depends on which way the solid happens to be facing — and the step
+  // before this one has just turned it.
+  //
+  // The sampled part of the canvas is the triangle u + v <= 1: every
+  // fundamental triangle carries the UVs (0,0), (0,1), (1,0), and the
+  // texture is uploaded with flipY off, so the surface reads the pixel at
+  // (u*W, v*H). The arc below stays inside that with room to spare.
+  tour_stroke() {
+    const canvas = document.getElementById('textureCanvas') as HTMLCanvasElement | null;
+    const context = canvas?.getContext('2d', { willReadFrequently: true });
+    if (!canvas || !context) return;
+    const steps = 72;
+    const path: Array<[number, number]> = [];
+    for (let i = 0; i <= steps; i++) {
+      const s = i / steps;
+      const u = 0.08 + 0.60 * s;
+      const v = 0.09 + 0.26 * Math.sin(Math.PI * s);
+      path.push([u * canvas.width, v * canvas.height]);
+    }
+    context.strokeStyle = this.pen_color;
+    context.lineWidth = this.pen_radius * 2.4;
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    // Extended a segment at a time, as the real pen does. Redrawing the
+    // whole path each frame would mean restoring the canvas underneath it
+    // first, which is a full-size blit sixty times a second.
+    let drawn = 0;
+    this.tour_animate(1200, (eased) => {
+      const upto = Math.round(eased * steps);
+      if (upto <= drawn) return;
+      context.beginPath();
+      context.moveTo(path[drawn][0], path[drawn][1]);
+      for (let i = drawn + 1; i <= upto; i++) context.lineTo(path[i][0], path[i][1]);
+      context.stroke();
+      drawn = upto;
+      this.renderer?.mark_texture_dirty();
+      this.is_dirty = true;
+    });
+  }
+
+  // The stellation slider, moving on its own: one cycle of a sine, so the
+  // shape is left where the step found it whichever way the step is left.
+  tour_stellation() {
+    if (this.planar()) return;
+    const input = input_of('shape-stellation');
+    if (!input) return;
+    const from = input_value('shape-stellation', 1);
+    const low = parseFloat(input.min) || 0.2;
+    const high = parseFloat(input.max) || 3;
+    this.tour_animate(2600, (_eased, raw) => {
+      // Short of the slider's own ends, so the sweep reads as a sweep rather
+      // than as a pause against a stop.
+      const value = from + 0.9 * Math.sin(2 * Math.PI * raw);
+      input.value = Math.max(low, Math.min(high, value)).toFixed(2);
+      this.regenerate_shape();
+    });
+  }
+
+  // The seed walked round its own triangle: a corner, an edge, the middle,
+  // the opposite edge and home — which is the regular solid, a truncation,
+  // the omnitruncated one and another truncation, in that order.
+  tour_seed() {
+    if (!input_checked('shape-seed-on')) return;
+    const middle: Vec3 = [1 / 3, 1 / 3, 1 / 3];
+    const stations: Vec3[] = [
+      [0.9, 0.05, 0.05], [0.47, 0.47, 0.06], middle, [0.06, 0.47, 0.47], middle
+    ];
+    const legs = stations.length - 1;
+    this.tour_animate(3600, (_eased, raw) => {
+      const place = Math.min(raw, 0.999999) * legs;
+      const leg = Math.floor(place), f = place - leg;
+      const a = stations[leg], b = stations[leg + 1];
+      this.seed = [
+        a[0] + (b[0] - a[0]) * f,
+        a[1] + (b[1] - a[1]) * f,
+        a[2] + (b[2] - a[2]) * f
+      ];
+      this.draw_seed_pad();
+      this.regenerate_shape();
+    });
   }
 }
 
