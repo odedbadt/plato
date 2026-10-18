@@ -90,8 +90,11 @@ html, body {
 .floating-btn.active { background: rgba(255,255,255,0.55); }
 
 /* Paper mode: the wireframe reads as ink on a page, so the canvas ground goes
-   light while it is on. The buttons sit on that ground, so they darken to stay
-   legible — their glyphs stay white rather than being recoloured. */
+   light — but only when the edges are the whole picture. With the solid shown
+   the lines are drawn against the solid, so the ground stays dark and
+   wireframe_options() picks the ink to suit the surface instead. The buttons
+   sit on whichever ground is up, so they darken here to stay legible — their
+   glyphs stay white rather than being recoloured. */
 body.paper {
   background-color: #f4f3ef;
 }

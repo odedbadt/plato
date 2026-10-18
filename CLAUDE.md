@@ -228,6 +228,27 @@ prepass is the same one the wireframe's "hide edges round the back" uses, so
 `draw_model()` in `app.ts` tracks whether the solid's depth is already in the
 buffer rather than laying it twice.
 
+The ground and the wireframe's ink move together, and only the wireframe
+*alone* turns the page light: `sync_layer_buttons()` sets `body.paper` on
+`wireframe && !model`. With the solid up the lines are drawn against the solid
+rather than against the page, so the page stays dark — and the ink has to move
+with that, or it would be near-black on near-black, which is what the
+hard-coded dark ink left behind when paper mode stopped being unconditional.
+
+The ink's rule is **not** simply the inverse of the ground, though, and this is
+the part that is easy to get wrong. `wireframe_options()` darkens the ink when
+whatever sits *behind the lines* is light, which is two different things: the
+paper page, or — when the surface is shown — a tiling's own surface, which is
+near-white whatever the page does. A solid's surface is mid-grey, so light ink
+reads on it; on a disc the same ink vanishes completely. Hence
+`paper || (planar() && model)` rather than `paper`. Nothing further down needs
+a switch: the renderer derives `uInkOnDark` from the colour's own luminance, so
+the sRGB alpha correction follows the colour.
+
+Note also that the *dimming of the style controls* keys off the wireframe
+alone, not off the ground — those two conditions sit on adjacent lines in
+`sync_layer_buttons()` and are genuinely different.
+
 **`src/ts/glsl.ts`** — Raw GLSL shader strings. Directional lighting via dot-product normal shading; texture sampling with alpha blending.
 
 **`src/ts/webgl_utils.ts`** — Matrix math helpers (`gl-matrix`) and geometry conversion: `model_to_geometry()` converts a generated model → Three.js `BufferGeometry`, `matrix_uniforms()` computes projection/view/rotation matrices.

@@ -1206,9 +1206,13 @@ export class App {
         ?.classList.toggle('active', input_checked(id));
     }
     const wireframe = input_checked('wireframe');
-    // Ink on paper: the ground goes light while the wireframe is up.
-    document.body.classList.toggle('paper', wireframe);
-    // The style, weight and hide-back controls do nothing while it is off.
+    // Ink on paper only when the edges are the picture. With the solid up the
+    // ground stays dark, because the solid — not the page — is what the lines
+    // are drawn against. wireframe_options() reads this class back, so the ink
+    // colour follows the ground.
+    document.body.classList.toggle('paper', wireframe && !input_checked('model'));
+    // The style, weight and hide-back controls do nothing while it is off —
+    // which is about the wireframe alone, not about the ground.
     document.getElementById('wireframe-options')?.classList.toggle('off', !wireframe);
   }
 
@@ -1451,10 +1455,19 @@ export class App {
     const halo = style === 'depth-halo';
     const halo_gain = 1.5;   // the doc's middle of the 1-2 range that reads best
 
+    // The ink darkens when what sits behind the lines is light. Two things
+    // are: the paper page (sync_layer_buttons()' own output, so reading the
+    // class back is the single source of truth), and a tiling's surface, which
+    // is near-white whatever the page under it does — a solid's is mid-grey, so
+    // light ink reads on it, but on a disc it would vanish. The renderer
+    // derives uInkOnDark from this colour's luminance, so the sRGB alpha
+    // correction follows without a second switch.
+    const light_behind = document.body.classList.contains('paper')
+      || (this.planar() && input_checked('model'));
+
     const base = {
       ...DEFAULT_WIREFRAME_OPTIONS,
-      // Paper mode means the ground is always light, so the ink is always dark.
-      color: [0.09, 0.10, 0.12] as [number, number, number],
+      ...(light_behind ? { color: [0.09, 0.10, 0.12] as [number, number, number] } : {}),
       flat: style === 'uniform',
       halo,
       hide_back: !!(document.getElementById('wf-hide-back') as HTMLInputElement)?.checked,
