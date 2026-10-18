@@ -85,6 +85,8 @@ html, body {
 #clear-btn       { top: calc(max(16px, env(safe-area-inset-top)) + 54px); }
 #model-picker-btn { top: calc(max(16px, env(safe-area-inset-top)) + 108px); }
 #wireframe-btn   { top: calc(max(16px, env(safe-area-inset-top)) + 162px); }
+#model-btn       { top: calc(max(16px, env(safe-area-inset-top)) + 216px); }
+#texture-btn     { top: calc(max(16px, env(safe-area-inset-top)) + 270px); }
 .floating-btn.active { background: rgba(255,255,255,0.55); }
 
 /* Paper mode: the wireframe reads as ink on a page, so the canvas ground goes
@@ -361,6 +363,20 @@ legend {
 #plane-options input,
 #shape-options input {
   accent-color: #448AFF;
+}
+
+/* The three layers — surface, drawing, edges — are mixed rather than chosen
+   between, so they go side by side in one row instead of down a list. */
+#layer-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+#layer-row .layer-toggle {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
 }
 
 /* Seed pad. The classic controls describe the same solid a different way, so

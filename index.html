@@ -60,6 +60,22 @@
     </svg>
   </button>
 
+  <!-- The other two layers, under the wireframe toggle. All three are the
+       same hexagon: filled for the surface, scribbled on for the drawing,
+       opened out into its edges for the wireframe. -->
+  <button id="model-btn" class="floating-btn" title="Model surface">
+    <svg viewBox="0 0 20 20" fill="white" xmlns="http://www.w3.org/2000/svg">
+      <path d="M10 1.5 L18 6 L18 14 L10 18.5 L2 14 L2 6 Z"/>
+    </svg>
+  </button>
+
+  <button id="texture-btn" class="floating-btn" title="Drawing">
+    <svg viewBox="0 0 20 20" fill="none" stroke="white" stroke-linecap="round" xmlns="http://www.w3.org/2000/svg">
+      <path d="M10 1.5 L18 6 L18 14 L10 18.5 L2 14 L2 6 Z" stroke-width="1.1" opacity="0.45"/>
+      <path d="M5 12.6 C6.6 8.2, 8.6 13.6, 10.2 9.6 C11.8 5.6, 13.6 10.4, 15 8.2" stroke-width="1.9"/>
+    </svg>
+  </button>
+
   <!-- Model picker modal -->
   <div id="model-picker-overlay" class="hidden">
     <div id="model-picker-modal">
@@ -146,10 +162,22 @@
         <div id="plane-status"></div>
       </fieldset>
       <fieldset id="rendering-options">
-        <legend>Rendering options:</legend>
-        <div>
-          <input type="checkbox" id="model" checked=true name="model" value="model">
-          <label for="model">Model</label>
+        <legend>Show:</legend>
+        <!-- The three layers, each on its own: the lit surface, the drawing on
+             it and the edges. Drawing works whichever of them are up. -->
+        <div id="layer-row">
+          <span class="layer-toggle">
+            <input type="checkbox" id="model" checked=true name="model" value="model">
+            <label for="model">Model</label>
+          </span>
+          <span class="layer-toggle">
+            <input type="checkbox" id="texture" checked=true name="texture" value="texture">
+            <label for="texture">Drawing</label>
+          </span>
+          <span class="layer-toggle">
+            <input type="checkbox" id="wireframe" name="wireframe" value="wireframe">
+            <label for="wireframe">Wireframe</label>
+          </span>
         </div>
         <div>
           <input type="radio" id="generating-mirrors" name="mirrors" value="generating-mirrors">
@@ -200,11 +228,7 @@
         </div>
       </fieldset>
       <fieldset id="wireframe-options">
-        <legend>Wireframe:</legend>
-        <div>
-          <input type="checkbox" id="wireframe" name="wireframe" value="wireframe">
-          <label for="wireframe">Wireframe</label>
-        </div>
+        <legend>Wireframe style:</legend>
         <div class="wf-sub">
           <select id="wireframe-mode">
             <option value="uniform">Even lines</option>

@@ -5317,8 +5317,10 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _webgl_utils__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./webgl_utils */ "./src/ts/webgl_utils.ts");
 /* harmony import */ var _webgl_renderer__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./webgl_renderer */ "./src/ts/webgl_renderer.ts");
 /* harmony import */ var _symmetry__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./symmetry */ "./src/ts/symmetry/index.ts");
-/* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/quat.js");
-/* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/vec3.js");
+/* harmony import */ var _url_state__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./url_state */ "./src/ts/url_state.ts");
+/* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/quat.js");
+/* harmony import */ var gl_matrix__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! gl-matrix */ "./node_modules/gl-matrix/esm/vec3.js");
+
 
 
 
@@ -5382,11 +5384,18 @@ function _floodfill(read_ctx, write_ctx, replaced_color, new_color, x, y, w, h) 
 function project_to_sphere(x, y) {
     const r2 = x * x + y * y;
     if (r2 <= 1.0) {
-        return gl_matrix__WEBPACK_IMPORTED_MODULE_4__.fromValues(x, y, Math.sqrt(1.0 - r2));
+        return gl_matrix__WEBPACK_IMPORTED_MODULE_5__.fromValues(x, y, Math.sqrt(1.0 - r2));
     }
     const r = Math.sqrt(r2);
-    return gl_matrix__WEBPACK_IMPORTED_MODULE_4__.fromValues(x / r, y / r, 0);
+    return gl_matrix__WEBPACK_IMPORTED_MODULE_5__.fromValues(x / r, y / r, 0);
 }
+// The three layers of the picture, each with a floating toggle in the main
+// view and a checkbox in the panel: [checkbox id, button id].
+const LAYER_BUTTONS = [
+    ['model', 'model-btn'],
+    ['texture', 'texture-btn'],
+    ['wireframe', 'wireframe-btn'],
+];
 // Shape controls, by the kind of event they report changes with.
 const SHAPE_SLIDERS = ['shape-stellation', 'shape-size', 'shape-mirror-size'];
 const SHAPE_TOGGLES = ['shape-dual', 'shape-rhombic', 'shape-seed-on'];
@@ -5566,8 +5575,8 @@ class App {
         this.prefered_model_name = prefered_model_name;
         this.model = null;
         this.spinning_speed = 0;
-        this.rotation = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create();
-        gl_matrix__WEBPACK_IMPORTED_MODULE_3__.rotateX(this.rotation, this.rotation, Math.PI / 3);
+        this.rotation = gl_matrix__WEBPACK_IMPORTED_MODULE_4__.create();
+        gl_matrix__WEBPACK_IMPORTED_MODULE_4__.rotateX(this.rotation, this.rotation, Math.PI / 3);
         this.pen_color = pen_color || 'green';
         this.pen_radius = pen_radius || 5;
         this.dpr = window.devicePixelRatio;
@@ -5580,6 +5589,22 @@ class App {
     init() {
         const _this = this;
         drop_stale_model_cache();
+        // Read before anything is built. The controls are initialised from these
+        // fields as they are hooked up, so the link has to be in hand first. What
+        // a link leaves out it means at its default, not "as you had it": a
+        // shared address has to arrive the same way whether it is opened in a
+        // fresh tab or pasted over a session that has been played with.
+        const url = { ..._url_state__WEBPACK_IMPORTED_MODULE_3__.DEFAULT_URL_STATE, ...(0,_url_state__WEBPACK_IMPORTED_MODULE_3__.read_url_state)() };
+        this.apply_url_view(url);
+        // Pasting an address into a tab that is already here changes the hash
+        // without reloading anything, so without this the URL would be describing
+        // a view the app is not in. Our own writes are replaceState, which does
+        // not fire this.
+        window.addEventListener('hashchange', () => {
+            const changed = { ..._url_state__WEBPACK_IMPORTED_MODULE_3__.DEFAULT_URL_STATE, ...(0,_url_state__WEBPACK_IMPORTED_MODULE_3__.read_url_state)() };
+            this.apply_url_view(changed);
+            this.apply_url_controls(changed);
+        });
         this.init_canvas_sizes();
         // Initialize WebGL renderer with cached shader programs
         const main_canvas = document.getElementById("mainCanvas");
@@ -5620,11 +5645,14 @@ class App {
             });
             this.load_preset(this.prefered_model_name, () => {
                 _this.sync_symmetry_controls();
+                // The preset is the opening view; a link is a set of departures from
+                // it, so it goes on top rather than instead of it.
+                _this.apply_url_controls(url);
                 const clear_btn = document.getElementById('clear-canvas-button');
                 clear_btn?.addEventListener('click', () => _this.clear());
                 // const cache_clear_btn = document.getElementById('clear-cache');
                 // cache_clear_btn.addEventListener('click', () => localStorage.clear());
-                for (const id of ['model', 'wireframe', 'wireframe-mode', 'wf-hide-back']) {
+                for (const id of ['model', 'texture', 'wireframe', 'wireframe-mode', 'wf-hide-back']) {
                     document.getElementById(id)?.addEventListener('change', () => { _this.is_dirty = true; });
                 }
                 // Whether the mirrors are shown is a rendering choice for a solid,
@@ -5862,26 +5890,20 @@ class App {
         document.getElementById('clear-btn')?.addEventListener('click', () => this.clear());
         // Model picker open button
         document.getElementById('model-picker-btn')?.addEventListener('click', () => this.open_model_picker());
-        // Floating wireframe toggle, mirroring the checkbox in the controls panel
-        const wireframe_btn = document.getElementById('wireframe-btn');
-        const wireframe_checkbox = document.getElementById('wireframe');
-        const sync_wireframe_btn = () => {
-            const on = !!wireframe_checkbox?.checked;
-            wireframe_btn?.classList.toggle('active', on);
-            // Ink on paper: the ground goes light while the wireframe is up.
-            document.body.classList.toggle('paper', on);
-            // The style, weight and hide-back controls do nothing while it is off.
-            document.getElementById('wireframe-options')?.classList.toggle('off', !on);
-        };
-        wireframe_btn?.addEventListener('click', () => {
-            if (!wireframe_checkbox)
-                return;
-            wireframe_checkbox.checked = !wireframe_checkbox.checked;
-            sync_wireframe_btn();
-            this.is_dirty = true;
-        });
-        wireframe_checkbox?.addEventListener('change', sync_wireframe_btn);
-        sync_wireframe_btn();
+        // The floating layer toggles, mirroring the checkboxes in the controls
+        // panel. Either can flip; both read the same checkbox.
+        for (const [id, button_id] of LAYER_BUTTONS) {
+            const checkbox = document.getElementById(id);
+            document.getElementById(button_id)?.addEventListener('click', () => {
+                if (!checkbox)
+                    return;
+                checkbox.checked = !checkbox.checked;
+                this.sync_layer_buttons();
+                this.is_dirty = true;
+            });
+            checkbox?.addEventListener('change', () => this.sync_layer_buttons());
+        }
+        this.sync_layer_buttons();
         this.init_shape_controls();
         // Close modal when clicking the backdrop
         const overlay = document.getElementById('model-picker-overlay');
@@ -5915,9 +5937,9 @@ class App {
         thumb_tex.width = 1;
         thumb_tex.height = 1;
         const thumb_renderer = new _webgl_renderer__WEBPACK_IMPORTED_MODULE_1__.WebglRenderer(thumb_canvas, thumb_tex, true);
-        const rot = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create();
-        gl_matrix__WEBPACK_IMPORTED_MODULE_3__.rotateX(rot, rot, Math.PI / 4);
-        gl_matrix__WEBPACK_IMPORTED_MODULE_3__.rotateY(rot, rot, Math.PI / 5);
+        const rot = gl_matrix__WEBPACK_IMPORTED_MODULE_4__.create();
+        gl_matrix__WEBPACK_IMPORTED_MODULE_4__.rotateX(rot, rot, Math.PI / 4);
+        gl_matrix__WEBPACK_IMPORTED_MODULE_4__.rotateY(rot, rot, Math.PI / 5);
         const solid_uniforms = _webgl_utils__WEBPACK_IMPORTED_MODULE_0__.matrix_uniforms(rot);
         // Thumbnails are square, and a disc reads better than a strip, so the
         // hyperbolic ones all show the disc whichever model the main view is on.
@@ -6074,13 +6096,13 @@ class App {
             const scale = 2.0 / Math.min(rect.width, rect.height);
             const v_from = project_to_sphere((from_x - rect.width / 2) * scale, -(from_y - rect.height / 2) * scale);
             const v_to = project_to_sphere((to_x - rect.width / 2) * scale, -(to_y - rect.height / 2) * scale);
-            const axis = gl_matrix__WEBPACK_IMPORTED_MODULE_4__.cross(gl_matrix__WEBPACK_IMPORTED_MODULE_4__.create(), v_from, v_to);
-            const angle = Math.acos(Math.min(1.0, gl_matrix__WEBPACK_IMPORTED_MODULE_4__.dot(v_from, v_to)));
-            if (gl_matrix__WEBPACK_IMPORTED_MODULE_4__.length(axis) > 1e-6) {
-                gl_matrix__WEBPACK_IMPORTED_MODULE_4__.normalize(axis, axis);
-                const delta = gl_matrix__WEBPACK_IMPORTED_MODULE_3__.setAxisAngle(gl_matrix__WEBPACK_IMPORTED_MODULE_3__.create(), axis, angle);
-                gl_matrix__WEBPACK_IMPORTED_MODULE_3__.multiply(this.rotation, delta, this.rotation);
-                gl_matrix__WEBPACK_IMPORTED_MODULE_3__.normalize(this.rotation, this.rotation);
+            const axis = gl_matrix__WEBPACK_IMPORTED_MODULE_5__.cross(gl_matrix__WEBPACK_IMPORTED_MODULE_5__.create(), v_from, v_to);
+            const angle = Math.acos(Math.min(1.0, gl_matrix__WEBPACK_IMPORTED_MODULE_5__.dot(v_from, v_to)));
+            if (gl_matrix__WEBPACK_IMPORTED_MODULE_5__.length(axis) > 1e-6) {
+                gl_matrix__WEBPACK_IMPORTED_MODULE_5__.normalize(axis, axis);
+                const delta = gl_matrix__WEBPACK_IMPORTED_MODULE_4__.setAxisAngle(gl_matrix__WEBPACK_IMPORTED_MODULE_4__.create(), axis, angle);
+                gl_matrix__WEBPACK_IMPORTED_MODULE_4__.multiply(this.rotation, delta, this.rotation);
+                gl_matrix__WEBPACK_IMPORTED_MODULE_4__.normalize(this.rotation, this.rotation);
                 this.is_dirty = true;
             }
         };
@@ -6321,7 +6343,6 @@ class App {
                 option.textContent = _symmetry__WEBPACK_IMPORTED_MODULE_2__.hyperbolic.PROJECTION_LABELS[key];
                 projection.appendChild(option);
             }
-            projection.value = this.projection;
             projection.addEventListener('change', () => {
                 // The two models are the same tiling seen two ways, and the viewer
                 // has not moved, so the view isometry carries straight over.
@@ -6345,9 +6366,20 @@ class App {
             this.plane_view = [1, 0, 0, 0, 1, 0, 0, 0, 1];
             this.regenerate_shape();
         });
+        this.sync_plane_controls();
+    }
+    // The plane controls hold their state on the app rather than in the DOM, so
+    // they are written to rather than read from — on startup, and again
+    // whenever a URL moves the view out from under them.
+    sync_plane_controls() {
         set_input_value('hyper-cutoff', this.cutoff);
         set_input_value('euclid-scale', this.euclid_scale);
         set_input_checked('plane-checker', this.checker);
+        const projection = document.getElementById('hyper-projection');
+        // Empty until init_plane_controls() fills it, which is after the first
+        // call to this; it sets the value itself on the way past.
+        if (projection?.options.length)
+            projection.value = this.projection;
     }
     draw_seed_pad() {
         const pad = document.getElementById('shape-seed-pad');
@@ -6415,6 +6447,21 @@ class App {
         this.seed = (spec.seed ?? [...DEFAULT_SEED]);
         this.sync_seed_mode();
     }
+    // The floating toggles, the ground and the dependent controls, all
+    // following the three layer checkboxes. A method rather than a closure in
+    // init_actions because the URL can set those checkboxes long after the
+    // listeners are hooked up, and it has to look the same either way.
+    sync_layer_buttons() {
+        for (const [id, button_id] of LAYER_BUTTONS) {
+            document.getElementById(button_id)
+                ?.classList.toggle('active', input_checked(id));
+        }
+        const wireframe = input_checked('wireframe');
+        // Ink on paper: the ground goes light while the wireframe is up.
+        document.body.classList.toggle('paper', wireframe);
+        // The style, weight and hide-back controls do nothing while it is off.
+        document.getElementById('wireframe-options')?.classList.toggle('off', !wireframe);
+    }
     // Seed mode and the classic controls are two descriptions of the same solid,
     // so the panel shows which one is live.
     sync_seed_mode() {
@@ -6422,6 +6469,123 @@ class App {
         document.getElementById('shape-options')?.classList.toggle('wythoff', on);
         if (on)
             this.draw_seed_pad();
+    }
+    // ---- The address bar ----------------------------------------------------
+    //
+    // The URL is a second copy of the view, so it only ever reads the state and
+    // writes it back; nothing downstream asks it anything. Fields that do not
+    // apply to what is being drawn are reported at their default so that
+    // encode_url_state() drops them: a solid's link carries no pan, a tiling's
+    // carries no rotation, and seed mode and the classic knobs each leave the
+    // other's settings out — the same split regenerate_shape() already makes
+    // when it decides which of the two to read.
+    url_snapshot() {
+        const seed_on = input_checked('shape-seed-on');
+        const sum = this.seed[0] + this.seed[1] + this.seed[2] || 1;
+        const classic = (value, dflt) => seed_on ? dflt : value;
+        return {
+            triple: this.current_angles().slice(),
+            stellation: classic(input_value('shape-stellation', 1), _url_state__WEBPACK_IMPORTED_MODULE_3__.DEFAULT_URL_STATE.stellation),
+            size: input_value('shape-size', 1),
+            mirror_size: input_value('shape-mirror-size', 1),
+            dual: classic(input_checked('shape-dual'), _url_state__WEBPACK_IMPORTED_MODULE_3__.DEFAULT_URL_STATE.dual),
+            rhombic: classic(input_checked('shape-rhombic'), _url_state__WEBPACK_IMPORTED_MODULE_3__.DEFAULT_URL_STATE.rhombic),
+            seed_on,
+            seed: seed_on
+                ? this.seed.map(w => w / sum) : _url_state__WEBPACK_IMPORTED_MODULE_3__.DEFAULT_URL_STATE.seed.slice(),
+            rotation: this.planar()
+                ? _url_state__WEBPACK_IMPORTED_MODULE_3__.DEFAULT_URL_STATE.rotation.slice() : Array.from(this.rotation),
+            plane_view: this.planar()
+                ? this.plane_view.slice() : _url_state__WEBPACK_IMPORTED_MODULE_3__.DEFAULT_URL_STATE.plane_view.slice(),
+            projection: this.projection,
+            cutoff: this.cutoff,
+            cell_size: this.euclid_scale,
+            checker: this.checker,
+            solid: input_checked('model'),
+            texture: input_checked('texture'),
+            mirrors: input_checked('all-mirrors') ? 'a'
+                : input_checked('generating-mirrors') ? 'g'
+                    : input_checked('no-mirrors') ? 'n' : '',
+            wireframe: input_checked('wireframe'),
+            wireframe_mode: document.getElementById('wireframe-mode')
+                ?.value ?? _url_state__WEBPACK_IMPORTED_MODULE_3__.DEFAULT_URL_STATE.wireframe_mode,
+            wireframe_weight: input_value('wf-weight', 1),
+            hide_back: input_checked('wf-hide-back')
+        };
+    }
+    // The half of a URL that lives on the app rather than in the DOM, applied
+    // before the controls are hooked up — init_plane_controls() writes these
+    // fields into their inputs as it goes, so setting them first is what puts
+    // the panel in step with the link.
+    apply_url_view(url) {
+        if (url.rotation) {
+            gl_matrix__WEBPACK_IMPORTED_MODULE_4__.set(this.rotation, url.rotation[0], url.rotation[1], url.rotation[2], url.rotation[3]);
+            // A rounded quaternion is no longer quite a rotation.
+            gl_matrix__WEBPACK_IMPORTED_MODULE_4__.normalize(this.rotation, this.rotation);
+        }
+        if (url.projection)
+            this.projection = url.projection;
+        if (url.cutoff !== undefined)
+            this.cutoff = url.cutoff;
+        if (url.cell_size !== undefined)
+            this.euclid_scale = url.cell_size;
+        if (url.checker !== undefined)
+            this.checker = url.checker;
+        this.sync_plane_controls();
+    }
+    // The rest of it: the controls, then the group, then where the viewer
+    // stands. That order is forced — set_triple() sends the viewer back to the
+    // origin whenever the group changes under it, which on load it always does,
+    // so a pan restored before the triple would be thrown away by it.
+    apply_url_controls(url) {
+        if (url.stellation !== undefined)
+            set_input_value('shape-stellation', url.stellation);
+        if (url.size !== undefined)
+            set_input_value('shape-size', url.size);
+        if (url.mirror_size !== undefined)
+            set_input_value('shape-mirror-size', url.mirror_size);
+        if (url.dual !== undefined)
+            set_input_checked('shape-dual', url.dual);
+        if (url.rhombic !== undefined)
+            set_input_checked('shape-rhombic', url.rhombic);
+        if (url.seed_on !== undefined)
+            set_input_checked('shape-seed-on', url.seed_on);
+        // The seed belongs to this half and not to apply_url_view, late as that
+        // looks: sync_shape_controls() puts it back to the preset's as the preset
+        // loads, which is after the view half has run.
+        if (url.seed)
+            this.seed = url.seed.slice();
+        if (url.solid !== undefined)
+            set_input_checked('model', url.solid);
+        if (url.texture !== undefined)
+            set_input_checked('texture', url.texture);
+        if (url.mirrors !== undefined) {
+            // The group starts with none of the three chosen, which is a state no
+            // radio can be set to — so they are written one by one rather than by
+            // checking the one that won.
+            const chosen = { a: 'all-mirrors', g: 'generating-mirrors', n: 'no-mirrors' }[url.mirrors];
+            for (const id of ['all-mirrors', 'generating-mirrors', 'no-mirrors']) {
+                set_input_checked(id, id === chosen);
+            }
+        }
+        if (url.wireframe !== undefined)
+            set_input_checked('wireframe', url.wireframe);
+        // One sync for all three, after whichever of them the link mentioned.
+        this.sync_layer_buttons();
+        if (url.wireframe_mode) {
+            const select = document.getElementById('wireframe-mode');
+            if (select)
+                select.value = url.wireframe_mode;
+        }
+        if (url.wireframe_weight !== undefined)
+            set_input_value('wf-weight', url.wireframe_weight);
+        if (url.hide_back !== undefined)
+            set_input_checked('wf-hide-back', url.hide_back);
+        if (url.triple)
+            this.set_triple(url.triple);
+        if (url.plane_view && this.planar())
+            this.plane_view = url.plane_view.slice();
+        this.regenerate_shape();
     }
     // The canvas's shape, which decides how the plane is fitted into it.
     canvas_aspect() {
@@ -6575,16 +6739,34 @@ class App {
             return;
         }
         this.is_dirty = false;
+        // Nothing changes the picture without asking for a frame, so this one
+        // hook catches every change there is — a slider, a pan, a group, a
+        // checkbox — and the write behind it is throttled and deduplicated, so
+        // the frames that are redrawn for other reasons cost nothing.
+        (0,_url_state__WEBPACK_IMPORTED_MODULE_3__.schedule_url_write)(() => this.url_snapshot());
         // Refresh texture from canvas
         this.renderer.refresh_texture();
         // Compute uniforms
         const uniforms = this.view_uniforms();
         // Begin frame
         this.renderer.begin_frame();
-        // Draw main model
-        const modelCheckbox = document.getElementById('model');
-        if (modelCheckbox?.checked && this.model) {
-            this.renderer.draw_model(this.model, uniforms);
+        // Draw main model. The lit surface and the drawing on it are separate
+        // layers of one pass, so either can be up without the other; drawing on
+        // the canvas never depended on them at all (pick_uv ray-casts the mesh on
+        // the CPU), so the pen works whatever is shown.
+        const show_surface = input_checked('model');
+        const show_ink = input_checked('texture');
+        // Whether the solid's own depth is in the buffer, which is what keeps the
+        // far side of it out of sight. Drawing the surface puts it there; drawing
+        // only the ink has to lay it down first, or the ink on the back shows
+        // through the blank front.
+        let depth_laid = false;
+        if (this.model && (show_surface || show_ink)) {
+            if (!show_surface) {
+                this.renderer.draw_model_depth_only(this.model, uniforms);
+            }
+            this.renderer.draw_model(this.model, uniforms, show_surface, show_ink);
+            depth_laid = true;
         }
         // Draw wireframe. After the model so solid faces hide the edges behind them,
         // before the mirrors so the mirror planes don't cull half the edges (the
@@ -6593,7 +6775,7 @@ class App {
         if (wireframeCheckbox?.checked && this.model) {
             const wireframe_options = this.wireframe_options();
             // With the solid hidden, its depth alone still removes the back edges.
-            if (wireframe_options.hide_back && !modelCheckbox?.checked) {
+            if (wireframe_options.hide_back && !depth_laid) {
                 this.renderer.draw_model_depth_only(this.model, uniforms);
             }
             // A tiling's edges were built with its mesh and come over directly;
@@ -6673,16 +6855,26 @@ in float fBrightness;
 
 out vec4 fragColor;
 uniform sampler2D uTexture;
+// The surface and the drawing on it are two independent layers of the same
+// pass: uSurface is the lit ground's own alpha, uInk scales the drawing's.
+// Both at 1 is the classic look; ink alone leaves the drawing standing in
+// space where the solid's surface was.
+uniform float uSurface;
+uniform float uInk;
 
 void main(void) {
     vec4 sampled = texture(uTexture, vTextureCoord);
-    // -    fragColor = vec4(
-    //   -      0.3+0.7*fBrightness * white_back,1.0);
+    float ink = sampled.a * uInk;
     vec3 shaded_back  = 0.3+0.7*vec3(fBrightness);
     vec3 shaded_front = 0.3+0.7*fBrightness * sampled.rgb;
-    float front_alpha =sampled.a; 
-    fragColor = vec4(shaded_front*front_alpha+shaded_back*(1.0-front_alpha), 1.0);
-    //fragColor = vec4(white_back,1.0);
+    // Ink over ground, where the ground itself may be transparent. The colour
+    // has to come out un-premultiplied for NormalBlending, so the composite is
+    // divided back out by its own alpha; at uSurface = 1 that cancels and this
+    // is exactly the plain shaded blend.
+    float alpha = ink + uSurface * (1.0 - ink);
+    if (alpha <= 0.001) discard;
+    vec3 rgb = (shaded_front * ink + shaded_back * uSurface * (1.0 - ink)) / alpha;
+    fragColor = vec4(rgb, alpha);
 }
 `;
 const FS_SOURCE_MIRRORS = `precision mediump float;
@@ -9151,6 +9343,222 @@ function wythoff_edges(mirrors, transformations, options = {}) {
 
 /***/ },
 
+/***/ "./src/ts/url_state.ts"
+/*!*****************************!*\
+  !*** ./src/ts/url_state.ts ***!
+  \*****************************/
+(__unused_webpack_module, __webpack_exports__, __webpack_require__) {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   DEFAULT_URL_STATE: () => (/* binding */ DEFAULT_URL_STATE),
+/* harmony export */   decode_url_state: () => (/* binding */ decode_url_state),
+/* harmony export */   encode_url_state: () => (/* binding */ encode_url_state),
+/* harmony export */   read_url_state: () => (/* binding */ read_url_state),
+/* harmony export */   schedule_url_write: () => (/* binding */ schedule_url_write)
+/* harmony export */ });
+// What is in the address bar.
+//
+// The view, and only the view: which group, what shape of it, where the
+// viewer stands, and what is drawn. Not the drawing itself — that is a canvas
+// and does not fit in a URL — so a shared link reproduces the picture up to
+// whatever has been sketched on it.
+//
+// Two things keep it short enough to read. Fields equal to the opening view
+// are not written at all, so the plain app has a bare URL and a link carries
+// only what was actually changed; and every write is a `replaceState`, so a
+// drag leaves one address rather than a hundred entries in the back button.
+//
+// Nothing here knows about the app: this file turns a flat record into a
+// string and back, and `app.ts` is what maps that record onto the controls.
+const SCHEMA = {
+    triple: { key: 'g', kind: 'numbers', count: 3, decimals: 0 },
+    stellation: { key: 'st', kind: 'number', decimals: 3 },
+    size: { key: 'sz', kind: 'number', decimals: 3 },
+    mirror_size: { key: 'mz', kind: 'number', decimals: 3 },
+    dual: { key: 'du', kind: 'bool' },
+    rhombic: { key: 'rh', kind: 'bool' },
+    seed_on: { key: 'sd', kind: 'bool' },
+    seed: { key: 'sp', kind: 'numbers', count: 3, decimals: 4 },
+    rotation: { key: 'r', kind: 'numbers', count: 4, decimals: 4 },
+    plane_view: { key: 'v', kind: 'numbers', count: 9, decimals: 5 },
+    projection: { key: 'pj', kind: 'text', allowed: ['disc', 'halfplane'] },
+    cutoff: { key: 'cu', kind: 'number', decimals: 3 },
+    cell_size: { key: 'cs', kind: 'number', decimals: 3 },
+    checker: { key: 'ck', kind: 'bool' },
+    solid: { key: 'm', kind: 'bool' },
+    texture: { key: 'tx', kind: 'bool' },
+    mirrors: { key: 'mi', kind: 'text', allowed: ['', 'a', 'g', 'n'] },
+    wireframe: { key: 'w', kind: 'bool' },
+    wireframe_mode: {
+        key: 'wm', kind: 'text', allowed: ['uniform', 'depth', 'depth-halo']
+    },
+    wireframe_weight: { key: 'ww', kind: 'number', decimals: 2 },
+    hide_back: { key: 'wb', kind: 'bool' }
+};
+// The opening view, which is also what gets left out of the URL. It has to
+// agree with the `stellated_dodecahedron` preset and the control defaults in
+// index.html; where it drifts the only cost is a redundant field in the link.
+const DEFAULT_URL_STATE = {
+    triple: [5, 3, 2],
+    stellation: 2,
+    size: 1,
+    mirror_size: 1,
+    dual: false,
+    rhombic: false,
+    seed_on: false,
+    seed: [1 / 3, 1 / 3, 1 / 3],
+    // quat.rotateX(identity, pi/3), as app.ts starts it.
+    rotation: [Math.sin(Math.PI / 6), 0, 0, Math.cos(Math.PI / 6)],
+    plane_view: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+    projection: 'disc',
+    cutoff: 0.95,
+    cell_size: 0.22,
+    checker: true,
+    solid: true,
+    texture: true,
+    mirrors: '',
+    wireframe: false,
+    wireframe_mode: 'depth-halo',
+    wireframe_weight: 1,
+    hide_back: false
+};
+// A number as short as its precision allows. Trailing zeros go, and so does
+// the sign of zero — `-0` and `0` are the same view, and a URL that cannot
+// decide which it has is a URL that looks like it changed when it did not.
+function format_number(value, decimals) {
+    if (!Number.isFinite(value))
+        return '0';
+    const text = value.toFixed(decimals);
+    const trimmed = decimals > 0 ? text.replace(/\.?0+$/, '') : text;
+    return trimmed === '' || trimmed === '-0' ? '0' : trimmed;
+}
+function format_field(spec, value) {
+    switch (spec.kind) {
+        case 'bool':
+            return value ? '1' : '0';
+        case 'number':
+            return typeof value === 'number'
+                ? format_number(value, spec.decimals ?? 3) : null;
+        case 'numbers':
+            return Array.isArray(value) && value.length === spec.count
+                ? value.map(v => format_number(v, spec.decimals ?? 3)).join(',') : null;
+        case 'text':
+            return typeof value === 'string'
+                && (!spec.allowed || spec.allowed.includes(value)) ? value : null;
+    }
+}
+function parse_field(spec, text) {
+    switch (spec.kind) {
+        case 'bool':
+            return text === '1' ? true : text === '0' ? false : undefined;
+        case 'number': {
+            const value = Number(text);
+            return Number.isFinite(value) ? value : undefined;
+        }
+        case 'numbers': {
+            const parts = text.split(',').map(Number);
+            return parts.length === spec.count && parts.every(Number.isFinite)
+                ? parts : undefined;
+        }
+        case 'text':
+            return !spec.allowed || spec.allowed.includes(text) ? text : undefined;
+    }
+}
+// `k=v&k=v`, with the fields that are still at their opening value left out.
+// The comparison is on the encoded text rather than the value, so a third
+// that arrives back as 0.3333 still counts as untouched.
+function encode_url_state(state) {
+    const parts = [];
+    for (const field of Object.keys(SCHEMA)) {
+        const spec = SCHEMA[field];
+        const encoded = format_field(spec, state[field]);
+        if (encoded === null)
+            continue;
+        if (encoded === format_field(spec, DEFAULT_URL_STATE[field]))
+            continue;
+        parts.push(`${spec.key}=${encoded}`);
+    }
+    return parts.join('&');
+}
+// Whatever of a URL is legible. A field that is missing, misspelled or out of
+// range is dropped and the app keeps its own value for it, so a hand-edited
+// address degrades to a partial one instead of breaking the view.
+function decode_url_state(raw) {
+    const by_key = new Map();
+    for (const field of Object.keys(SCHEMA)) {
+        by_key.set(SCHEMA[field].key, { ...SCHEMA[field], field });
+    }
+    const state = {};
+    for (const pair of raw.split('&')) {
+        if (!pair)
+            continue;
+        const split = pair.indexOf('=');
+        const key = split < 0 ? pair : pair.slice(0, split);
+        const text = split < 0 ? '' : decodeURIComponent(pair.slice(split + 1));
+        const spec = by_key.get(key);
+        if (!spec)
+            continue;
+        const value = parse_field(spec, text);
+        if (value !== undefined)
+            state[spec.field] = value;
+    }
+    return state;
+}
+// The hash is where the state is written; a query string is read as well so a
+// link that was tidied up by hand, or copied out of one, still works.
+function read_url_state() {
+    const hash = location.hash.replace(/^#/, '');
+    return decode_url_state(hash || location.search.replace(/^\?/, ''));
+}
+let pending = null;
+let last_write_time = 0;
+let last_written = null;
+function write_url_state(state) {
+    const encoded = encode_url_state(state);
+    if (encoded === last_written)
+        return;
+    // The opening view is the empty URL, and the opening view is also where
+    // every session starts, so without this the first frame of a plain visit
+    // would rewrite the address to say nothing.
+    if (!encoded && !location.hash && last_written === null)
+        return;
+    last_written = encoded;
+    // The hash and not the query, so the link is plainly app state and a reload
+    // of it never reaches the server; replaceState and not pushState, so a pan
+    // does not bury the page the visitor came from under its own trail.
+    history.replaceState(null, '', location.pathname + location.search + (encoded ? `#${encoded}` : ''));
+}
+// At most one write per window, but the *first* one goes out at once.
+//
+// The delay is there to coalesce a stream — a pan is tens of changes a second
+// and WebKit rate-limits replaceState — and a stream is exactly the case
+// where the intermediate states do not matter. A one-off change is the
+// opposite: picking a group is a single event, and if the window swallowed it
+// the address bar would spend the next 400ms describing the view that was
+// just left. That gap is reachable, not theoretical — a reload inside it
+// comes back to the old shape — so discrete changes land immediately and
+// only a second change inside the window waits, carrying whatever the state
+// has become by the time the window closes.
+function schedule_url_write(snapshot, delay = 400) {
+    if (pending)
+        return;
+    const since = Date.now() - last_write_time;
+    if (since >= delay) {
+        last_write_time = Date.now();
+        write_url_state(snapshot());
+        return;
+    }
+    pending = setTimeout(() => {
+        pending = null;
+        last_write_time = Date.now();
+        write_url_state(snapshot());
+    }, delay - since);
+}
+
+
+/***/ },
+
 /***/ "./src/ts/webgl_renderer.ts"
 /*!**********************************!*\
   !*** ./src/ts/webgl_renderer.ts ***!
@@ -9223,6 +9631,8 @@ class WebglRenderer {
                 projector: { value: null },
                 model_transformer: { value: null },
                 uTexture: { value: this.texture },
+                uSurface: { value: 1.0 },
+                uInk: { value: 1.0 },
             },
             glslVersion: three__WEBPACK_IMPORTED_MODULE_0__.GLSL3,
             transparent: true,
@@ -9348,8 +9758,15 @@ class WebglRenderer {
         }
         return this.cached_model_geo;
     }
-    draw_model(model, uniforms) {
+    // The surface and the drawing on it are separately switchable. With the
+    // surface off the pass still runs over the same geometry, so the drawing
+    // keeps its place in space and its shading; it is only the lit ground
+    // underneath that goes. Lay down `draw_model_depth_only` first in that case,
+    // or the ink on the far side shows through the blank near side.
+    draw_model(model, uniforms, surface = true, ink = true) {
         this.apply_uniforms(this.main_material, uniforms);
+        this.main_material.uniforms.uSurface.value = surface ? 1.0 : 0.0;
+        this.main_material.uniforms.uInk.value = ink ? 1.0 : 0.0;
         this.render_pass(this.model_geometry(model), this.main_material, false);
     }
     // Lay the solid into the depth buffer without drawing it, so a wireframe
@@ -9357,6 +9774,10 @@ class WebglRenderer {
     draw_model_depth_only(model, uniforms) {
         this.apply_uniforms(this.main_material, uniforms);
         const geometry = this.model_geometry(model);
+        // Opaque ground, no ink: the shader discards fully transparent fragments,
+        // so this is what makes the whole surface land in the depth buffer.
+        this.main_material.uniforms.uSurface.value = 1.0;
+        this.main_material.uniforms.uInk.value = 0.0;
         this.main_material.colorWrite = false;
         this.render_pass(geometry, this.main_material, false);
         this.main_material.colorWrite = true;
