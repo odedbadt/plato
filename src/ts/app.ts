@@ -13,6 +13,7 @@ import {
   decode_url_state, encode_url_state
 } from './url_state'
 import { init_tour, TourSnapshot } from './tour'
+import { Scribbler } from './scribbler'
 function parse_RGBA(color: string): [number, number, number, number] {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = 1;
@@ -272,6 +273,9 @@ export class App {
   plane_view: Mat3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
   // Built alongside the mesh, since the tiling has to walk the cells anyway.
   plane_edges: { starts: number[], ends: number[] } | null = null;
+  // The pen that draws by itself. Null until the canvases exist; see
+  // scribbler.ts for why it owns the texture canvas while it runs.
+  scribbler: Scribbler | null = null;
   // Multi-touch state
   active_pointers: Map<number, { x: number, y: number }> = new Map();
   rotating: boolean = false;
@@ -313,6 +317,7 @@ export class App {
     const texture_canvas = document.getElementById("textureCanvas") as HTMLCanvasElement;
     if (main_canvas && texture_canvas) {
       this.renderer = new WebglRenderer(main_canvas, texture_canvas);
+      this.scribbler = new Scribbler(texture_canvas);
     }
 
     this.clear();
@@ -383,7 +388,17 @@ export class App {
   }
   init_animation_loop() {
     const _this = this;
-    const animate = () => {
+    const animate = (now: number) => {
+      // The scribbler is the one thing that changes the picture without
+      // anyone touching it, so it asks for its own frames. It is not in the
+      // URL — a trail that erases itself is a motion and not a state — so
+      // draw_model()'s write hook finds the same text every frame and the
+      // address bar stays quiet.
+      if (_this.scribbler?.running) {
+        _this.scribbler.step(now, _this.pen_radius);
+        _this.renderer?.mark_texture_dirty();
+        _this.is_dirty = true;
+      }
       if (_this.model) {
         _this.draw_model()
       }
@@ -543,6 +558,8 @@ export class App {
       texture_canvas_context?.drawImage(offscreen_canvas_element, 0, 0,
         texture_canvas_element.width,
         texture_canvas_element.height);
+      // The scribbler's backdrop is a copy of this canvas, so it follows it.
+      this.scribbler?.resize();
     }
     set_size();
     const resize_observer = new ResizeObserver(entries => {
@@ -610,6 +627,25 @@ export class App {
       if (model_canvas) model_canvas.style.cursor = is_fill ? 'cell' : 'crosshair';
       this.is_dirty = true;
     })
+
+    // The pen that draws by itself. Starting it turns the drawing layer on:
+    // with that layer hidden the whole effect would be invisible, and a
+    // button that looks like it did nothing is worse than one that takes a
+    // liberty.
+    const scribble_div = document.getElementById('scribble-tool');
+    scribble_div?.addEventListener('click', () => {
+      const running = !!this.scribbler?.toggle();
+      this.sync_scribble_button();
+      if (running) {
+        const checkbox = input_of('texture');
+        if (checkbox && !checkbox.checked) {
+          checkbox.checked = true;
+          this.sync_layer_buttons();
+        }
+      }
+      this.is_dirty = true;
+      this.renderer?.mark_texture_dirty();
+    });
 
     // Floating clear button (outside controls panel)
     document.getElementById('clear-btn')?.addEventListener('click', () => this.clear());
@@ -784,12 +820,28 @@ export class App {
       }
     });
   }
+  // The scribbler can be stopped by something other than its own button —
+  // the tour does it — so the lit state is read back from it rather than
+  // flipped by whoever asked.
+  sync_scribble_button() {
+    document.getElementById('scribble-tool')
+      ?.classList.toggle('active', !!this.scribbler?.running);
+  }
+  // The canvas the drawing lives on, which is the texture canvas except
+  // while the scribbler is running — then that one is a composite it rebuilds
+  // every frame, and the drawing is the backdrop it composites over.
+  ink_context(): CanvasRenderingContext2D | null {
+    return this.scribbler?.ink_context() ?? null;
+  }
   clear() {
     const texture_canvas = document.getElementById("textureCanvas") as HTMLCanvasElement;
     if (!texture_canvas) return;
     const texture_context = texture_canvas.getContext('2d', { willReadFrequently: true });
     if (!texture_context) return;
     texture_context.clearRect(0, 0, texture_canvas.width, texture_canvas.height);
+    // Clearing the composite is not enough while the scribbler runs: the next
+    // frame would put the drawing straight back from the backdrop.
+    this.scribbler?.clear();
     this.is_dirty = true;
     this.renderer?.mark_texture_dirty();
   }
@@ -820,6 +872,12 @@ export class App {
     if (!texture_canvas || !model_canvas) return;
     const texture_context = texture_canvas.getContext('2d', { willReadFrequently: true });
     if (!texture_context) return;
+    // Where the ink goes. Normally that is the texture canvas itself. While
+    // the scribbler is running the canvas is a composite it rebuilds every
+    // frame, so the pen has to write to the drawing underneath instead — the
+    // next frame lays the trail back over it. Asked for per use rather than
+    // captured, because the scribbler can be started and stopped under it.
+    const ink = (): CanvasRenderingContext2D => this.ink_context() ?? texture_context;
     this.clear();
 
     const w = texture_canvas.width;
@@ -888,12 +946,12 @@ export class App {
 
     const commit_stroke = () => {
       if (this.path && this.mirror_path) {
-        texture_context.lineWidth = this.pen_radius;
-        texture_context.beginPath();
-        texture_context.stroke(this.path);
+        ink().lineWidth = this.pen_radius;
+        ink().beginPath();
+        ink().stroke(this.path);
         this.path = null;
-        texture_context.beginPath();
-        texture_context.stroke(this.mirror_path);
+        ink().beginPath();
+        ink().stroke(this.mirror_path);
         this.mirror_path = null;
         this.renderer?.mark_texture_dirty();
       }
@@ -925,12 +983,12 @@ export class App {
       if (this.active_tool === 'fill') {
         const tw = texture_canvas.width;
         const th = texture_canvas.height;
-        const replaced_color = texture_context.getImageData(coords[0], coords[1], 1, 1).data;
+        const replaced_color = ink().getImageData(coords[0], coords[1], 1, 1).data;
         const parsed_fore_color = parse_RGBA(this.pen_color);
-        _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, coords[0], coords[1], tw, th);
+        _floodfill(ink(), ink(), replaced_color, parsed_fore_color, coords[0], coords[1], tw, th);
         const mx = tw - 1 - coords[1];
         const my = th - 1 - coords[0];
-        _floodfill(texture_context, texture_context, replaced_color, parsed_fore_color, mx, my, tw, th);
+        _floodfill(ink(), ink(), replaced_color, parsed_fore_color, mx, my, tw, th);
         this.renderer?.mark_texture_dirty();
         this.is_dirty = true;
         return;
@@ -938,9 +996,9 @@ export class App {
 
       this.path = new Path2D();
       this.mirror_path = new Path2D();
-      texture_context.strokeStyle = 'black';
-      texture_context.fillStyle = this.pen_color;
-      texture_context.lineWidth = 1;
+      ink().strokeStyle = 'black';
+      ink().fillStyle = this.pen_color;
+      ink().lineWidth = 1;
       this.prev_coords = [coords[0], coords[1]];
       const mirror_coords = mirror_coordinates(coords);
       this.path.moveTo(coords[0], coords[1]);
@@ -1005,10 +1063,10 @@ export class App {
         if (dist2(coords, this.prev_coords) > 4) {
           this.path.lineTo(coords[0], coords[1]);
           this.mirror_path.lineTo(mirror_coords[0], mirror_coords[1]);
-          texture_context.strokeStyle = this.pen_color;
-          texture_context.lineWidth = this.pen_radius * 2;
-          texture_context.stroke(this.path);
-          texture_context.stroke(this.mirror_path);
+          ink().strokeStyle = this.pen_color;
+          ink().lineWidth = this.pen_radius * 2;
+          ink().stroke(this.path);
+          ink().stroke(this.mirror_path);
         } else {
           this.path.moveTo(coords[0], coords[1]);
           this.mirror_path.moveTo(mirror_coords[0], mirror_coords[1]);
@@ -1017,14 +1075,14 @@ export class App {
       this.prev_coords = [coords[0], coords[1]];
       this.prev_mirror_coords = [mirror_coords[0], mirror_coords[1]];
 
-      texture_context.fillStyle = this.pen_color;
-      texture_context.beginPath();
-      texture_context.ellipse(coords[0], coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2);
-      texture_context.fill();
-      texture_context.lineWidth = 0;
-      texture_context.beginPath();
-      texture_context.ellipse(mirror_coords[0], mirror_coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2);
-      texture_context.fill();
+      ink().fillStyle = this.pen_color;
+      ink().beginPath();
+      ink().ellipse(coords[0], coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2);
+      ink().fill();
+      ink().lineWidth = 0;
+      ink().beginPath();
+      ink().ellipse(mirror_coords[0], mirror_coords[1], this.pen_radius, this.pen_radius, 0, 0, Math.PI * 2);
+      ink().fill();
       this.is_dirty = true;
       this.renderer?.mark_texture_dirty();
     });
@@ -1654,6 +1712,11 @@ export class App {
   // Everything the tour disturbs, so that a run abandoned halfway leaves no
   // trace of itself.
   tour_capture(): TourSnapshot {
+    // The scribbler would be redrawing the canvas under the tour's feet, and
+    // what the tour has to put back is the drawing rather than a frame of an
+    // animation. Stopping it restores the drawing, so this is taken of that.
+    this.scribbler?.stop();
+    this.sync_scribble_button();
     const source = document.getElementById('textureCanvas') as HTMLCanvasElement | null;
     let texture: HTMLCanvasElement | null = null;
     if (source && source.width && source.height) {

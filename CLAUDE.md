@@ -403,6 +403,79 @@ padding makes it *taller* rather than giving it more to scroll, and the
 sections at its end stay behind the card — the one way a step can end up
 pointing at something invisible.
 
+**`src/ts/scribbler.ts`** — a pen that draws by itself: a random walk with
+the hue turning as it goes and the trail behind it desaturating, darkening
+and fading out. The tool for it is in the panel's button grid, next to the
+fill tool, and starting it turns the drawing layer on, since with that layer
+hidden the whole thing would be invisible.
+
+The walk lives in **UV space, inside the triangle `u + v <= 1`** — the part
+of the texture a surface actually samples — rather than on the canvas. So one
+wandering line is drawn on every copy of the fundamental domain at once, and
+it scribbles over the whole solid in step with its symmetry. That is also why
+it knows nothing about geometry: a solid, a tiling, a seed-mode truncation
+and a stellation mid-drag are all the same walk, because the UVs do not move
+when the vertices do.
+
+Three things are worth knowing before changing it:
+
+1. **While it runs, the texture canvas is a composite** — the drawing with
+   the trail laid over it, rebuilt from a `backdrop` copy every frame. The
+   trail therefore cannot be appended to the canvas the way the pen's strokes
+   are, and the pen cannot write to the canvas either or the next frame would
+   wipe it. So `init_texture_sketcher()` asks `App.ink_context()` for where
+   the ink goes (`ink()`, read per use rather than captured) and gets the
+   backdrop while this is running, the texture canvas otherwise. Flood fill
+   comes along for free: it reads and writes the drawing, not the trail.
+   `clear()` has to clear both, or the next frame puts the drawing back.
+2. **The trail is a performance, not a deposit.** `stop()` restores the
+   drawing exactly as it was, which is also what makes it safe for
+   `tour_capture()` to stop it and capture what is underneath.
+3. **The fade needs the alpha and not just the lightness.** Fading to black
+   vanishes on the dark ground but leaves a grey ghost on paper, and a mark
+   has to disappear on both. Each mark keeps the hue it was laid with, so the
+   trail is a length of moving rainbow and only saturation, lightness and
+   alpha are functions of age.
+
+It is deliberately not in the URL: a trail that erases itself is a motion
+rather than a state, like the tour's three demos. That also keeps the address
+bar quiet while it runs — `draw_model()`'s write hook fires every frame, but
+the encoded text never changes and `write_url_state()` drops it.
+
+The walk is a damped random walk in the *heading*, not in the position: a
+Brownian point jitters in place, where a point with momentum and a wandering
+heading draws curls and long runs. The three sides of the triangle are a
+billiard, so it is turned back rather than stopped or wrapped and never piles
+up along an edge. Repainting is the whole trail every frame, confined to the
+box it painted last frame; the weight is the pen's own, so the pen-size
+buttons set it.
+
+`square_up()` is what makes the trail look like it **carries on into the next
+triangle** rather than bouncing off the edge of this one. There is no third
+option available: the drawing is the orbit of the walk under the group, so
+the curve always reaches a mirror in company with its own image, and either
+it is turned back or the picture stops being symmetric. What can be chosen is
+how the pair reads. At a shallow angle the two arms open into a wide V, the
+eye joins them, and it reads as a bounce; square-on, the mirror image *is*
+the continuation, and the arm that comes back is a hair off it, so what is
+seen on the far side is the walk going on into the neighbour. So the heading
+is turned towards the normal of the mirror it is approaching — and only while
+it is approaching, or a walk leaving one would be steered straight back into
+it. The wobble is held off over the same stretch, or it would undo the aim on
+the last stride.
+
+The two constants are a real trade and were picked by measuring, not by eye.
+Steering distorts the walk, so the longer the run-up the lumpier its coverage
+of the triangle: over 300s, the median crossing goes from 64 degrees off
+square to 89.5, but the spread of visits over a 66-cell grid goes from 0.24 to
+0.42 (sd/mean, so 0 would be perfectly even). A short run-up with a hard turn
+keeps both — 0.06 and 55/s leave the crossings square to within half a degree
+and every cell visited, where 0.13 and 25/s cost 7 cells entirely. Corner
+capture was the obvious next suspect and is not one: with the run-up this
+short the walk is inside two mirrors' bands 0.4% of the time, and steering it
+towards the centroid when it is does not improve the spread. The rosettes
+that show up at a vertex now and then are just what a random walk does.
+
 ### Model Format
 
 Every model is generated at runtime by `src/ts/symmetry/`; `static/models/` is gone and nothing is fetched.

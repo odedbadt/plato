@@ -146,6 +146,15 @@
           <circle cx="15" cy="15" r="2.5" fill="white"/>
         </svg>
       </div>
+      <!-- The pen that draws by itself: a random walk through the fundamental
+           triangle, so it scribbles over every copy of it at once. -->
+      <div class="action action-6" id="scribble-tool" title="Scribble by itself">
+        <svg viewBox="0 0 20 20" style="background-color:white;border: 1px solid #ccc;">
+          <path d="M3 13 C5 5.5, 7 16.5, 9.5 9.5 C12 3, 13.5 15, 17 8"
+                fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round"/>
+          <circle cx="17" cy="8" r="2" fill="black"/>
+        </svg>
+      </div>
       <div id="clear-canvas-button" class="action action-5"></div>
       <input type="color" id="color-picker" class="action" value="#ff0000">
     </div>

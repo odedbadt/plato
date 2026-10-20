@@ -422,7 +422,10 @@ body.tour-docked #controls-panel {
   background: #666;
 }
 
-#buttons #floodfill.active {
+/* The two tools that are modes rather than one-off actions, lit while they
+   are on: the fill tool and the pen that draws by itself. */
+#buttons #floodfill.active,
+#buttons #scribble-tool.active {
   outline: 2px solid #4af;
   outline-offset: 1px;
   background: rgba(64, 170, 255, 0.25);
