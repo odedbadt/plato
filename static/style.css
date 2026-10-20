@@ -428,6 +428,14 @@ body.tour-docked #controls-panel {
   background: rgba(64, 170, 255, 0.25);
 }
 
+/* Which colour the pen is on. The panel stays open while colours are tried,
+   so this ring is the only thing saying the pick landed. */
+#buttons .color.picked,
+#buttons #color-picker.picked {
+  outline: 2px solid #4af;
+  outline-offset: 1px;
+}
+
 #color-picker {
   width: 24px;
   height: 24px;

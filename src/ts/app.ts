@@ -556,21 +556,32 @@ export class App {
   }
   init_palette() {
     const color_divs = document.getElementsByClassName('color') as HTMLCollectionOf<HTMLElement>;
-    const controlsPanel = document.getElementById('controls-panel');
+    const colorPicker = document.getElementById('color-picker') as HTMLInputElement;
+    // Picking a colour leaves the panel open, as picking a pen size or the
+    // fill tool always has: trying a few in a row is the normal thing to do,
+    // and closing the panel on the first one makes the next pick cost two
+    // more clicks. The swatch's own ring is then the only feedback that the
+    // pick landed, so it has to be kept in step.
+    const mark_picked = (picked: HTMLElement | null) => {
+      for (let color_div of color_divs) {
+        color_div.classList.toggle('picked', color_div === picked);
+      }
+      colorPicker?.classList.toggle('picked', picked === null);
+    };
     for (let color_div of color_divs) {
       color_div.onclick = () => {
         const color = getComputedStyle(color_div).backgroundColor;
         this.pen_color = color;
-        controlsPanel?.classList.add('hidden');
+        mark_picked(color_div);
       }
     }
 
-    // Color picker
-    const colorPicker = document.getElementById('color-picker') as HTMLInputElement;
+    // Color picker. `input` rather than `change` so dragging round the
+    // native swatch tracks the pen as it goes.
     if (colorPicker) {
-      colorPicker.addEventListener('change', () => {
+      colorPicker.addEventListener('input', () => {
         this.pen_color = colorPicker.value;
-        controlsPanel?.classList.add('hidden');
+        mark_picked(null);
       });
     }
   }
