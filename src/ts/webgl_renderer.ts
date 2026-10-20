@@ -237,15 +237,26 @@ export class WebglRenderer {
 
   // The surface and the drawing on it are separately switchable. With the
   // surface off the pass still runs over the same geometry, so the drawing
-  // keeps its place in space and its shading; it is only the lit ground
-  // underneath that goes. Lay down `draw_model_depth_only` first in that case,
-  // or the ink on the far side shows through the blank near side.
+  // keeps its place in space; what goes is the lit ground underneath it, and
+  // with it the shading, since `uSurface` fades that off the ink too.
+  //
+  // `occludes` is whether what is drawn here should hide what is behind it,
+  // and it is the caller's call because only the caller knows whether the
+  // view is meant to be seen through. The lit surface always occludes. Ink
+  // left occluding on its own stands where the surface was as an opaque card:
+  // the painted part punches holes in the far side's ink and in the edges
+  // behind it while the unpainted part lets them through — and since a
+  // transparent fragment is discarded and writes no depth either way, that
+  // card is this `depthWrite`, not anything the shader puts on screen.
   draw_model(model: Model, uniforms: Uniforms,
-             surface: boolean = true, ink: boolean = true) {
+             surface: boolean = true, ink: boolean = true,
+             occludes: boolean = true) {
     this.apply_uniforms(this.main_material, uniforms);
     this.main_material.uniforms.uSurface.value = surface ? 1.0 : 0.0;
     this.main_material.uniforms.uInk.value = ink ? 1.0 : 0.0;
+    this.main_material.depthWrite = occludes;
     this.render_pass(this.model_geometry(model), this.main_material, false);
+    this.main_material.depthWrite = true;
   }
 
   // Lay the solid into the depth buffer without drawing it, so a wireframe
@@ -257,6 +268,7 @@ export class WebglRenderer {
     // so this is what makes the whole surface land in the depth buffer.
     this.main_material.uniforms.uSurface.value = 1.0;
     this.main_material.uniforms.uInk.value = 0.0;
+    this.main_material.depthWrite = true;
     this.main_material.colorWrite = false;
     this.render_pass(geometry, this.main_material, false);
     this.main_material.colorWrite = true;

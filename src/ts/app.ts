@@ -1541,27 +1541,45 @@ export class App {
     // the CPU), so the pen works whatever is shown.
     const show_surface = input_checked('model');
     const show_ink = input_checked('texture');
+    const wireframeCheckbox = document.getElementById('wireframe') as HTMLInputElement;
+    const show_wireframe = !!wireframeCheckbox?.checked;
+    const wireframe_options = show_wireframe ? this.wireframe_options() : null;
+    const hide_back = !!wireframe_options?.hide_back;
+    // Edges and drawing with no surface is the one view that is meant to be
+    // seen through, so it is the one where nothing lays the solid's depth. The
+    // surface is the only thing in the picture that is actually solid; with it
+    // off, laying its depth anyway — as this did, unconditionally — leaves the
+    // invisible surface still occluding, and an untouched canvas cost the
+    // wireframe its three back edges. That is what made the drawing layer read
+    // as an opaque white card: not its colour, which discards at alpha 0, but
+    // its depth.
+    //
+    // The two ways out of it both keep their old behaviour. "Hide edges round
+    // the back" is the explicit one — and when the surface is off its depth
+    // has to go down *before* the ink rather than after, or it would hide the
+    // edges round the back while leaving the drawing that is on them. With the
+    // wireframe off there is nothing to see through to and no reachable
+    // control either (`#wireframe-options.off` is `pointer-events: none`), so
+    // a drawing standing on its own goes on hiding its own far side.
+    const see_through = !show_surface && show_wireframe && !hide_back;
     // Whether the solid's own depth is in the buffer, which is what keeps the
-    // far side of it out of sight. Drawing the surface puts it there; drawing
-    // only the ink has to lay it down first, or the ink on the back shows
-    // through the blank front.
+    // far side of it out of sight.
     let depth_laid = false;
-    if (this.model && (show_surface || show_ink)) {
-      if (!show_surface) {
-        this.renderer.draw_model_depth_only(this.model, uniforms);
-      }
-      this.renderer.draw_model(this.model, uniforms, show_surface, show_ink);
+    if (this.model && !show_surface && !see_through && (show_ink || show_wireframe)) {
+      this.renderer.draw_model_depth_only(this.model, uniforms);
       depth_laid = true;
+    }
+    if (this.model && (show_surface || show_ink)) {
+      this.renderer.draw_model(this.model, uniforms, show_surface, show_ink, !see_through);
+      depth_laid = depth_laid || show_surface;
     }
 
     // Draw wireframe. After the model so solid faces hide the edges behind them,
     // before the mirrors so the mirror planes don't cull half the edges (the
     // halo prepass does leave faint hairlines on the planes in return).
-    const wireframeCheckbox = document.getElementById('wireframe') as HTMLInputElement;
-    if (wireframeCheckbox?.checked && this.model) {
-      const wireframe_options = this.wireframe_options();
+    if (wireframe_options && this.model) {
       // With the solid hidden, its depth alone still removes the back edges.
-      if (wireframe_options.hide_back && !depth_laid) {
+      if (hide_back && !depth_laid) {
         this.renderer.draw_model_depth_only(this.model, uniforms);
       }
       // A tiling's edges were built with its mesh and come over directly;

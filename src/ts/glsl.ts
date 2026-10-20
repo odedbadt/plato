@@ -41,7 +41,14 @@ void main(void) {
     vec4 sampled = texture(uTexture, vTextureCoord);
     float ink = sampled.a * uInk;
     vec3 shaded_back  = 0.3+0.7*vec3(fBrightness);
-    vec3 shaded_front = 0.3+0.7*fBrightness * sampled.rgb;
+    // The 0.3 is the lit material's ambient term and the fBrightness its
+    // lambert: both describe a surface, so they only belong on the ink while
+    // there is a surface under it to light. With the ground gone the ink is
+    // its own flat colour, which is what makes a drawing read as ink on
+    // nothing rather than as a lit body painted that colour. The mix is
+    // exactly identity at uSurface = 1, so the classic look is untouched —
+    // and so is draw_model_depth_only(), which drives this at uSurface = 1.
+    vec3 shaded_front = mix(sampled.rgb, 0.3+0.7*fBrightness * sampled.rgb, uSurface);
     // Ink over ground, where the ground itself may be transparent. The colour
     // has to come out un-premultiplied for NormalBlending, so the composite is
     // divided back out by its own alpha; at uSurface = 1 that cancels and this

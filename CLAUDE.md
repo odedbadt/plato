@@ -221,11 +221,42 @@ own alpha because `NormalBlending` wants an un-premultiplied colour; at
 `uSurface = 1` that division cancels and the shader is exactly the old blend,
 so the classic look is unchanged to the bit.
 
-With the surface off, `draw_model()` is preceded by `draw_model_depth_only()`.
-Without it the drawing on the far side shows through the blank near side,
-because a fully transparent fragment is discarded and so writes no depth. That
-prepass is the same one the wireframe's "hide edges round the back" uses, so
-`draw_model()` in `app.ts` tracks whether the solid's depth is already in the
+`uSurface` fades the *shading* of the ink as well as the ground under it. The
+`0.3` both shaded terms open with is the lit material's ambient and the
+`fBrightness` its lambert: both describe a surface, so they only belong on the
+ink while there is a surface beneath it to light. With the ground gone the ink
+is its own flat colour — `mix(sampled.rgb, 0.3 + 0.7 * fBrightness *
+sampled.rgb, uSurface)` — which is what makes a drawing read as ink on nothing
+rather than as a lit body painted that colour. `mix(x, y, 1.0)` is exactly `y`
+in floating point, so the classic path and `draw_model_depth_only()` (which
+drives this same shader at `uSurface = 1`) are both untouched to the bit.
+
+**The surface is the only thing in the picture that is solid, so it is the only
+thing that hides what is behind it.** Edges and drawing with no surface is the
+one view meant to be seen through, and it is the one where nothing lays the
+solid's depth: `see_through` in `draw_model()` is
+`!surface && wireframe && !hide_back`.
+
+Laying that depth unconditionally — as this did — is what made the drawing
+layer read as an opaque white card. The tell is that it did so with a
+completely **blank** canvas: an untouched drawing cost the wireframe its three
+back edges. So the card was never the layer's *colour*, which discards at
+alpha 0 and provably writes nothing (a `readPixels` either side of the ink
+pass is unchanged); it was `draw_model_depth_only()` leaving the invisible
+surface still occluding. Worth remembering when a layer seems to be painting
+something it cannot be painting: mask its colour writes and see if the symptom
+survives.
+
+The two ways out keep their old behaviour exactly. "Hide edges round the back"
+is the explicit one, and with the surface off its depth now goes down *before*
+the ink rather than after — otherwise it would hide the edges round the back
+while leaving the drawing that is on them. With the wireframe off there is
+nothing to see through to and no reachable control either
+(`#wireframe-options.off` is `pointer-events: none`), so a drawing standing on
+its own goes on hiding its own far side.
+
+`draw_model()`'s `occludes` argument carries this to the renderer as
+`depthWrite`; `app.ts` still tracks whether the solid's depth is already in the
 buffer rather than laying it twice.
 
 The ground and the wireframe's ink move together, and only the wireframe
